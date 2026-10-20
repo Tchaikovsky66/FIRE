@@ -1,0 +1,28 @@
+# Dependencies and build outputs
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+.vite/
+
+# Local configuration and personal financial exports
+.env
+.env.*
+!.env.example
+personal-data/
+exports/
+*.local
+
+# Keep the written video summary; exclude downloaded media and derived frames.
+downloads/*
+!downloads/BV1eTHZ6gENk_FIRE/
+downloads/BV1eTHZ6gENk_FIRE/*
+!downloads/BV1eTHZ6gENk_FIRE/summary.md
+
+# Operating system, Python and editor artifacts
+.DS_Store
+__pycache__/
+*.py[cod]
+.venv/
+*.log
