@@ -1,88 +1,70 @@
+import type { AssetBalances } from './asset-cash-flow';
+import type { LifeEvent, OneOffExpense } from './life-events';
+import type { ExternalIncome, InsurancePlanInput } from './insurance';
 export const MODEL_VERSION = '1.0.0';
-
-export type AssetInputs = {
-  cash?: number;
-  stocks?: number;
-  bonds?: number;
-  other?: number;
-};
-
-/** Values supplied by the Session. Undefined means the field is still blank. */
+export type { AssetBalances, LifeEvent, OneOffExpense, ExternalIncome, InsurancePlanInput };
+export type AssetInputs = Partial<AssetBalances>;
+export type ReturnScenario = 'conservative' | 'baseline' | 'optimistic';
+export type CoverageKey = 'continue' | 'stop';
+export type ScenarioReturns = Record<ReturnScenario, AssetBalances>;
+export type MonthlyDebtPayment = { id: string; label?: string; startMonth: number; endMonth: number; monthlyAmount: number; growth?: 'real' | 'nominal' };
 export type PlanDraft = {
-  currentAge?: number;
-  desiredRetirementAge?: number;
-  planningEndAge?: number;
-  annualLivingExpense?: number;
-  monthlyNetIncome?: number;
-  assets?: AssetInputs;
-  annualReturn?: number;
-  inflationRate?: number;
-  withdrawalRate?: number;
+  currentAge?: number; desiredRetirementAge?: number; planningEndAge?: number;
+  annualLivingExpense?: number; retirementAnnualLivingExpense?: number;
+  annualRigidExpense?: number; retirementAnnualRigidExpense?: number;
+  monthlyNetIncome?: number; assets?: AssetInputs;
+  /** Legacy uniform nominal return override; absent uses asset-specific scenarios. */
+  annualReturn?: number; inflationRate?: number; withdrawalRate?: number;
+  baseMonth?: string; scope?: 'individual' | 'household';
+  cashBufferMonths?: number; stockShock?: number; bondShock?: number;
+  targetAllocation?: AssetInputs; returnScenarios?: Partial<Record<ReturnScenario, AssetInputs>>;
+  otherReturnConfirmedZero?: boolean;
+  lifeEvents?: readonly LifeEvent[]; oneOffExpenses?: readonly OneOffExpense[];
+  debtPayments?: readonly MonthlyDebtPayment[];
+  coveragePlans?: Partial<Record<CoverageKey, InsurancePlanInput>>;
+  externalIncome?: readonly ExternalIncome[];
+  salaryRealGrowthRate?: number; salaryStartMonth?: number; salaryEndMonth?: number;
+  selfOccupiedHomeValue?: number; rentalPropertyValue?: number; debtBalance?: number;
+  manualTarget?: number; solverMaxAmount?: number;
 };
-
-export type CompletePlanInputs = {
-  currentAge: number;
-  desiredRetirementAge: number;
-  planningEndAge: number;
-  annualLivingExpense: number;
-  monthlyNetIncome: number;
-  assets: Required<AssetInputs>;
-  annualReturn: number;
-  inflationRate: number;
-  withdrawalRate: number;
+export type CompletePlanInputs = Omit<PlanDraft, 'currentAge'|'desiredRetirementAge'|'planningEndAge'|'annualLivingExpense'|'monthlyNetIncome'|'assets'|'inflationRate'|'withdrawalRate'|'returnScenarios'|'targetAllocation'|'coveragePlans'> & {
+  currentAge: number; desiredRetirementAge: number; planningEndAge: number;
+  annualLivingExpense: number; monthlyNetIncome: number; assets: AssetBalances;
+  inflationRate: number; withdrawalRate: number; cashBufferMonths: number;
+  stockShock: number; bondShock: number; targetAllocation: AssetBalances;
+  returnScenarios: ScenarioReturns; coveragePlans: Record<CoverageKey, InsurancePlanInput>;
+  solverMaxAmount: number;
 };
-
-export type FieldIssue = {
-  code: 'missing' | 'invalid' | 'out-of-range';
-  path: string;
-  message: string;
-};
-
+export type FieldIssue = { code: 'missing'|'invalid'|'out-of-range'|'conflicting-budget'; path: string; message: string; eventId?: string };
 export type AssetPathPoint = {
-  month: number;
-  age: number;
-  balance: number;
-  income: number;
-  spending: number;
-  shortfall: number;
+  month: number; age: number; balance: number; income: number; spending: number; shortfall: number;
+  inflationFactor: number; accounts: AssetBalances; openingAccounts: AssetBalances;
+  returns: number; investmentTransfer: number; internalTransferNet: number;
+  cashUsed: number; bufferTarget: number; bufferShortage: number;
+  livingExpense: number; debtPayment: number; oneOffExpense: number;
+  pensionIncome: number; externalIncome: number; contribution: number; medicalSelfPay: number;
 };
-
-export type PlanSnapshot = {
-  inputs: CompletePlanInputs;
-  capturedAtAge: number;
+export type PaymentShortfall = { month: number; amount: number };
+export type RetirementTarget = { kind: 'solved'; month: number; total: number; investmentPrincipal: number; cashBuffer: number; withdrawalRatePrincipal: number; withdrawalRateTotal: number; wholePathNeed: number; precision: number };
+export type SolverIssue = { kind: 'unresolved'; reason: 'search-bound'|'numeric-error'; message: string };
+export type TargetOutcome = RetirementTarget | SolverIssue;
+export type StressResult = { retirementMonth: number; initialAssets: number; minimumBalance: number; firstShortfall?: PaymentShortfall; path: readonly AssetPathPoint[]; stockShock: number; bondShock: number };
+export type Attainment = { kind: 'now'|'future'; month: number; age: number; path?: readonly AssetPathPoint[] } | { kind: 'not-reached'; firstShortfall?: PaymentShortfall } | SolverIssue;
+export type AdditionalContribution = { kind: 'none'; amount: 0 } | { kind: 'monthly'|'immediate'; amount: number; precision: number } | SolverIssue;
+export type CaseResult = {
+  retirementTarget: TargetOutcome;
+  assetPath: readonly AssetPathPoint[];
+  desiredRetirement: { age: number; month: number; projectedAssets: number; gap?: number };
+  assumptions: { returns: AssetBalances; inflationRate: number; withdrawalRate: number; cashBufferMonths: number };
+  firstShortfall?: PaymentShortfall;
+  stress?: StressResult;
+  attainment?: Attainment;
+  additionalContribution?: AdditionalContribution;
 };
-
-export type EvaluatedPlan = {
-  kind: 'evaluated';
-  modelVersion: typeof MODEL_VERSION;
-  snapshot: PlanSnapshot;
-  result: {
-    retirementTarget: {
-      total: number;
-      investmentPrincipal: number;
-      cashBuffer: number;
-    };
-    assetPath: readonly AssetPathPoint[];
-    desiredRetirement: {
-      age: number;
-      projectedAssets: number;
-      gap: number;
-    };
-  };
-};
-
-export type NeedsInputPlan = {
-  kind: 'needs-input';
-  issues: readonly FieldIssue[];
-  preview: {
-    knownAssets: number;
-    knownAnnualLivingExpense?: number;
-  };
-};
-
-export type InvalidPlan = {
-  kind: 'invalid';
-  issues: readonly FieldIssue[];
-};
-
+export type CaseKey = { coverage: CoverageKey; returns: ReturnScenario };
+export type CaseEvaluation = { key: CaseKey; outcome: { kind: 'evaluated'; result: CaseResult } | { kind: 'needs-input'; issues: readonly FieldIssue[] } | SolverIssue };
+export type PlanSnapshot = { inputs: CompletePlanInputs; capturedAtAge: number };
+export type EvaluatedPlan = { kind: 'evaluated'; modelVersion: typeof MODEL_VERSION; snapshot: PlanSnapshot; cases: readonly CaseEvaluation[]; result?: CaseResult };
+export type NeedsInputPlan = { kind: 'needs-input'; issues: readonly FieldIssue[]; preview: { knownAssets: number; knownAnnualLivingExpense?: number } };
+export type InvalidPlan = { kind: 'invalid'; issues: readonly FieldIssue[] };
 export type PlanEvaluation = EvaluatedPlan | NeedsInputPlan | InvalidPlan;
