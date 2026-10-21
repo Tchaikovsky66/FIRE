@@ -1,6 +1,7 @@
 import { MODEL_VERSION, type CaseEvaluation, type FieldIssue, type PlanDraft, type PlanEvaluation } from './contract';
 import { assetTotal, compileCase, simulate, solveTarget, stressSummary } from './internal/engine';
 import { validatePlan } from './internal/validate';
+import { solveRetirementTiming } from './internal/retirement-solve';
 
 export function evaluatePlan(draft: PlanDraft): PlanEvaluation {
   const checked=validatePlan(draft);
@@ -23,7 +24,7 @@ export function evaluatePlan(draft: PlanDraft): PlanEvaluation {
     const projectedAssets=assetTotal(pre.finalAssets);
     const sim=simulate(ctx);
     if(pre.numericError||sim.numericError){cases.push({key:{coverage,returns:scenario},outcome:{kind:'unresolved',reason:'numeric-error',message:'当前假设导致非有限数值'}});continue;}
-    cases.push({key:{coverage,returns:scenario},outcome:{kind:'evaluated',result:{retirementTarget:target,assetPath:sim.path,desiredRetirement:{age:inputs.desiredRetirementAge,month:retirementMonth,projectedAssets,gap:target.total-projectedAssets},assumptions:{returns:{...inputs.returnScenarios[scenario]},inflationRate:inputs.inflationRate,withdrawalRate:inputs.withdrawalRate,cashBufferMonths:inputs.cashBufferMonths},firstShortfall:sim.firstShortfall,...(scenario==='baseline'?{stress:stressSummary(ctx,projectedAssets)}:{})}}});
+    cases.push({key:{coverage,returns:scenario},outcome:{kind:'evaluated',result:{...solveRetirementTiming(inputs,coverage,scenario),retirementTarget:target,assetPath:sim.path,desiredRetirement:{age:inputs.desiredRetirementAge,month:retirementMonth,projectedAssets,gap:target.total-projectedAssets},assumptions:{returns:{...inputs.returnScenarios[scenario]},inflationRate:inputs.inflationRate,withdrawalRate:inputs.withdrawalRate,cashBufferMonths:inputs.cashBufferMonths},firstShortfall:sim.firstShortfall,...(scenario==='baseline'?{stress:stressSummary(ctx,projectedAssets)}:{})}}});
   }
   const primary=cases.find(c=>c.key.coverage==='continue'&&c.key.returns==='baseline');
   return {kind:'evaluated',modelVersion:MODEL_VERSION,snapshot:{inputs,capturedAtAge:inputs.currentAge},cases,...(primary?.outcome.kind==='evaluated'?{result:primary.outcome.result}:{})};

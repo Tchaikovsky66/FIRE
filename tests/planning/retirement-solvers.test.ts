@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { evaluatePlan, type PlanDraft } from '../../src/planning';
 
+const none = { contributionMonthly: 0, contributionStartMonth: 0, contributionEndMonth: 0, contributionsAlreadyDeducted: false, medicalSelfPayMonthly: 0, pension: { status: 'none' as const }, externalIncome: [] };
 const plan: PlanDraft = {
   currentAge: 40, desiredRetirementAge: 41, planningEndAge: 42,
   annualLivingExpense: 0, retirementAnnualLivingExpense: 12_000,
   monthlyNetIncome: 1_000,
   assets: { cash: 0, stocks: 0, bonds: 0, other: 0 },
   annualReturn: 0, inflationRate: 0, withdrawalRate: 1, cashBufferMonths: 0,
+  coveragePlans: { continue: none, stop: none },
 };
 
 function baseline(draft: PlanDraft) {
