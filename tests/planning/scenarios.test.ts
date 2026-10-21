@@ -117,3 +117,10 @@ it.each([
  const r=result({...base,planningEndAge:33,inflationRate:.02,assets:{cash:100000,stocks:0,bonds:0,other:0},coveragePlans:{continue:{...none,pension:{status:'known',startMonth:12,monthlyAmount:1000,annualGrowthRate:0,amountBasis,growth}},stop:none}});
  expect(r.assetPath[12].pensionIncome).toBeCloseTo(start);expect(r.assetPath[24].pensionIncome).toBeCloseTo(nextYear);
 });
+
+it('preserves numeric-error when future real income overflows inside target simulation',()=>{
+ const evaluation=evaluatePlan({...base,currentAge:0,desiredRetirementAge:1,planningEndAge:150,annualLivingExpense:0,monthlyNetIncome:0,assets:{cash:100000,stocks:0,bonds:0,other:0},annualReturn:0,inflationRate:10,cashBufferMonths:0,externalIncome:[{id:'extreme',monthlyAmount:1e15,startMonth:0,endMonth:1800,annualGrowthRate:10,growth:'real'}]});
+ expect(evaluation.kind).toBe('evaluated');if(evaluation.kind!=='evaluated')return;
+ expect(evaluation.cases).toHaveLength(6);
+ for(const row of evaluation.cases)expect(row.outcome).toMatchObject({kind:'unresolved',reason:'numeric-error'});
+});

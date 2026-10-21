@@ -111,4 +111,3 @@ export function copyPlan(workspace: Workspace, id: string): Workspace {
 }
 export function renamePlan(workspace: Workspace, id: string, name: string): Workspace { return { ...workspace, plans: workspace.plans.map(plan => plan.id === id ? { ...plan, name } : plan) }; }
 export function selectPlan(workspace: Workspace, id: string): Workspace { return workspace.plans.some(plan => plan.id === id) ? { ...workspace, activePlanId: id } : workspace; }
-

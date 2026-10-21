@@ -25,7 +25,9 @@ export function evaluatePlan(draft: PlanDraft): PlanEvaluation {
     const projectedAssets=assetTotal(pre.finalAssets);
     const sim=simulate(ctx);
     if(pre.numericError||sim.numericError){cases.push({key:{coverage,returns:scenario},outcome:{kind:'unresolved',reason:'numeric-error',message:'当前假设导致非有限数值'}});continue;}
-    cases.push({key:{coverage,returns:scenario},outcome:{kind:'evaluated',result:{...solveRetirementTiming(inputs,coverage,scenario),retirementTarget:target,assetPath:sim.path,desiredRetirement:{age:inputs.desiredRetirementAge,month:retirementMonth,projectedAssets,gap:target.total-projectedAssets},assumptions:{returns:{...inputs.returnScenarios[scenario]},inflationRate:inputs.inflationRate,withdrawalRate:inputs.withdrawalRate,cashBufferMonths:inputs.cashBufferMonths},firstShortfall:sim.firstShortfall,...(scenario==='baseline'?{stress:stressSummary(ctx,projectedAssets)}:{})}}});
+    const stress=scenario==='baseline'?stressSummary(ctx,projectedAssets):undefined;
+    if(stress&&'kind' in stress){cases.push({key:{coverage,returns:scenario},outcome:stress});continue;}
+    cases.push({key:{coverage,returns:scenario},outcome:{kind:'evaluated',result:{...solveRetirementTiming(inputs,coverage,scenario),retirementTarget:target,assetPath:sim.path,desiredRetirement:{age:inputs.desiredRetirementAge,month:retirementMonth,projectedAssets,gap:target.total-projectedAssets},assumptions:{returns:{...inputs.returnScenarios[scenario]},inflationRate:inputs.inflationRate,withdrawalRate:inputs.withdrawalRate,cashBufferMonths:inputs.cashBufferMonths},firstShortfall:sim.firstShortfall,...(stress?{stress}:{})}}});
   }
   const primary=cases.find(c=>c.key.coverage==='continue'&&c.key.returns==='baseline');
   return {kind:'evaluated',modelVersion:MODEL_VERSION,snapshot:{inputs,capturedAtAge:inputs.currentAge},cases,...(primary?.outcome.kind==='evaluated'?{result:primary.outcome.result}:{})};

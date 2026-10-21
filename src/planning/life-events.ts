@@ -248,4 +248,3 @@ export function compileLifeEventTimeline(
   }
   return { months, issues };
 }
-
