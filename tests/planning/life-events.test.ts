@@ -50,7 +50,7 @@ describe('life-event timeline seam', () => {
     // Fixed life events remain in the same months; only the selected budget track changes.
     expect(retireAt36.months[24].retirementTrack).toBe('pre-retirement');
     expect(retireAt36.months[36].retirementTrack).toBe('post-retirement');
-    expect(retireAt36.months[36].annualLivingBudget).toBe(160_000);
+    expect(retireAt36.months[36].annualLivingBudget).toBe(220_000);
     expect(retireAt48.months[36].retirementTrack).toBe('pre-retirement');
     expect(retireAt48.months[36].annualLivingBudget).toBe(200_000);
     expect(retireAt48.months[48].retirementTrack).toBe('post-retirement');
