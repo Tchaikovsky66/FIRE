@@ -1,6 +1,6 @@
 # FIRE Module 设计
 
-状态：基于已确认的四轮需求形成的架构设计，尚未实现或性能验证。本文件不替代产品与计算规格，也不将技能调用视为开始应用实现的整体确认。
+状态：已在 `codex/fire-integration` 实现。本文记录设计约束；实际接口见 `src/planning/contract.ts`，运行与验收结果见 [交付验收](acceptance.md)。
 
 ## 1. 设计依据
 
@@ -8,7 +8,7 @@
 - [计算规格](calculation-spec.md)：月度现金流、资金目标、达标搜索、追加投入和压力测试。
 - [领域术语](../GLOSSARY.md)：统一财务用语；技术设计概念留在本文。
 
-当前目录仅包含规格、视频资料与处理脚本，没有既有网页代码、框架配置或需要兼容的网页 Module。本设计适用于新建 React + TypeScript + Vite 应用。
+本项目从规格、视频资料与处理脚本起步，现已实现 React + TypeScript + Vite 应用。
 
 ## 2. 核心决定：让复杂计算集中在深 Module
 
@@ -54,7 +54,7 @@ flowchart TD
 
 ## 4. Planning 的小 Interface
 
-以下代码用于说明形状，属于设计，尚非已实现的类型声明。
+以下代码用于说明设计形状；实际类型声明以 `src/planning/contract.ts` 为准。
 
 ```typescript
 export function evaluatePlan(draft: PlanDraft): PlanEvaluation;
@@ -274,4 +274,4 @@ Plan Documents 和 Local Persistence 验证损坏 JSON、版本迁移、合法�
 
 验收除产品要求外，应确认：所有公式在 Planning 内；无跨步骤调用顺序要求；输入、结果、报告和保存版本对应一致；资金与时间单位明确；实测实时交互性能；没有为假想变化建空壳抽象。
 
-目前交付的是架构文档，未执行应用构建、金融计算测试或浏览器验证。
+实现已执行生产构建、计算测试和桌面／手机视口浏览器验证；实测结果与真机等未验证范围记录在 [交付验收](acceptance.md)。
