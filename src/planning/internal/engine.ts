@@ -1,4 +1,4 @@
-import type { AssetBalances, AssetPathPoint, CompletePlanInputs, CoverageKey, PaymentShortfall, ReturnScenario, StressResult, TargetOutcome } from '../contract';
+import type { AssetBalances, AssetPathPoint, CompletePlanInputs, CoverageKey, PaymentShortfall, ReturnScenario, StressResult, SolverIssue, TargetOutcome } from '../contract';
 import { budgetAtMonth, type LifeEventTimelineInput } from '../life-events';
 import { evaluateInsurancePlans } from '../insurance';
 import { applyAccountCashFlow } from './account-cash-flow';
@@ -61,10 +61,11 @@ export function simulate(ctx:CompiledCase,options:{startMonth?:number;endMonth?:
   if(options.initialTotal!==undefined)assets=allocate(options.initialTotal,ctx.bufferAt(start),ctx.inputs.targetAllocation);
   const rates={cash:Math.pow(1+ctx.returns.cash,1/12)-1,stocks:Math.pow(1+ctx.returns.stocks,1/12)-1,bonds:Math.pow(1+ctx.returns.bonds,1/12)-1,other:Math.pow(1+ctx.returns.other,1/12)-1};
   let minimumBalance=assetTotal(assets),minimumBalanceMonth=start,minimumRealBalance=minimumBalance/Math.pow(1+ctx.inputs.inflationRate,start/12),minimumRealBalanceMonth=start;
-  const trackMinimum=(month:number)=>{const nominal=assetTotal(assets),real=nominal/Math.pow(1+ctx.inputs.inflationRate,month/12);if(nominal<minimumBalance){minimumBalance=nominal;minimumBalanceMonth=month;}if(real<minimumRealBalance){minimumRealBalance=real;minimumRealBalanceMonth=month;}};
-  const path:AssetPathPoint[]=[];let firstShortfall:PaymentShortfall|undefined,numericError=false;
+  const trackMinimum=(month:number)=>{const nominal=assetTotal(assets),real=nominal/Math.pow(1+ctx.inputs.inflationRate,month/12);if(!Number.isFinite(real)){numericError=true;return;}if(nominal<minimumBalance){minimumBalance=nominal;minimumBalanceMonth=month;}if(real<minimumRealBalance){minimumRealBalance=real;minimumRealBalanceMonth=month;}};
+  const path:AssetPathPoint[]=[];let firstShortfall:PaymentShortfall|undefined,numericError=!Number.isFinite(minimumRealBalance);
   for(let month=start;month<end;month++){
     const flow=ctx.flows[month];
+    if(Object.values(flow).some(value=>!Number.isFinite(value))||!Number.isFinite(1/flow.inflationFactor)){numericError=true;break;}
     if(month===ctx.retirementMonth)assets=allocate(assetTotal(assets),ctx.bufferAt(month),ctx.inputs.targetAllocation);
     const openingAccounts={...assets};
     const isShock=options.stress===true&&month===ctx.retirementMonth;
@@ -97,19 +98,29 @@ export function solveTarget(ctx:CompiledCase):TargetOutcome{
   const bound=ctx.inputs.solverMaxAmount,precision=0.01;
   if(!Number.isFinite(C)||!Number.isFinite(withdrawalRateTotal))return {kind:'unresolved',reason:'numeric-error',message:'当前假设导致非有限数值'};
   if(C>bound||withdrawalRateTotal>bound)return {kind:'unresolved',reason:'search-bound',message:'无法在当前搜索范围求解'};
-  const passes=(amount:number)=>{const s=simulate(ctx,{startMonth:R,initialTotal:amount,collect:false});return !s.numericError&&!s.firstShortfall;};
+  const numericIssue:SolverIssue={kind:'unresolved',reason:'numeric-error',message:'当前假设导致非有限数值'};
+  const check=(amount:number)=>{const s=simulate(ctx,{startMonth:R,initialTotal:amount,collect:false});return s.numericError?'numeric-error':s.firstShortfall?'fails':'passes';};
   let low=C,high=C;
-  if(!passes(C)){
+  const initial=check(C);
+  if(initial==='numeric-error')return numericIssue;
+  if(initial==='fails'){
     high=Math.min(bound,Math.max(C+1,withdrawalRateTotal,1000));
-    while(high<bound&&!passes(high))high=Math.min(bound,high*2);
-    if(!passes(high))return {kind:'unresolved',reason:'search-bound',message:'无法在当前搜索范围求解'};
-    for(let i=0;i<80&&high-low>precision;i++){const mid=(low+high)/2;if(passes(mid))high=mid;else low=mid;}
+    let upper=check(high);
+    while(high<bound&&upper==='fails'){high=Math.min(bound,high*2);upper=check(high);}
+    if(upper==='numeric-error')return numericIssue;
+    if(upper==='fails')return {kind:'unresolved',reason:'search-bound',message:'无法在当前搜索范围求解'};
+    for(let i=0;i<80&&high-low>precision;i++){
+      const mid=(low+high)/2,outcome=check(mid);
+      if(outcome==='numeric-error')return numericIssue;
+      if(outcome==='passes')high=mid;else low=mid;
+    }
   }
   const wholePathNeed=high,total=Math.max(withdrawalRateTotal,wholePathNeed);
-  if(!passes(total))return {kind:'unresolved',reason:'numeric-error',message:'目标资金未通过正向验证'};
+  if(check(total)!=='passes')return {kind:'unresolved',reason:'numeric-error',message:'目标资金未通过正向验证'};
   return {kind:'solved',month:R,total,investmentPrincipal:Math.max(0,total-C),cashBuffer:C,withdrawalRatePrincipal,withdrawalRateTotal,wholePathNeed,precision};
 }
-export function stressSummary(ctx:CompiledCase,initialTotal:number):StressResult{
+export function stressSummary(ctx:CompiledCase,initialTotal:number):StressResult|SolverIssue{
   const s=simulate(ctx,{startMonth:ctx.retirementMonth,initialTotal,stress:true});
+  if(s.numericError)return {kind:'unresolved',reason:'numeric-error',message:'压力测试出现非有限数值'};
   return {retirementMonth:ctx.retirementMonth,initialAssets:initialTotal,minimumBalance:s.minimumBalance,minimumRealBalance:s.minimumRealBalance,minimumBalanceMonth:s.minimumBalanceMonth,minimumRealBalanceMonth:s.minimumRealBalanceMonth,firstShortfall:s.firstShortfall,path:s.path,stockShock:ctx.inputs.stockShock,bondShock:ctx.inputs.bondShock};
 }
