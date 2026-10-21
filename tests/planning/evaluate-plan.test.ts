@@ -8,6 +8,10 @@ const validPlan: PlanDraft = {
   annualLivingExpense: 120_000,
   monthlyNetIncome: 30_000,
   assets: { cash: 100_000, stocks: 400_000, bonds: 200_000, other: 0 },
+  coveragePlans: {
+    continue: { contributionMonthly: 0, contributionStartMonth: 0, contributionEndMonth: 0, contributionsAlreadyDeducted: false, medicalSelfPayMonthly: 0, pension: { status: 'none' }, externalIncome: [] },
+    stop: { contributionMonthly: 0, contributionStartMonth: 0, contributionEndMonth: 0, contributionsAlreadyDeducted: false, medicalSelfPayMonthly: 0, pension: { status: 'none' }, externalIncome: [] },
+  },
 };
 
 describe('evaluatePlan', () => {
@@ -20,7 +24,10 @@ describe('evaluatePlan', () => {
     if (first.kind !== 'evaluated') return;
     expect(first.modelVersion).toBe('1.0.0');
     expect(first.snapshot.inputs.currentAge).toBe(35);
-    expect(first.result.retirementTarget.total).toBeGreaterThan(0);
+    expect(first.result).toBeDefined();
+    if (!first.result) return;
+    expect(first.result.retirementTarget.kind).toBe('solved');
+    if (first.result.retirementTarget.kind === 'solved') expect(first.result.retirementTarget.total).toBeGreaterThan(0);
     expect(first.result.assetPath).toHaveLength(600);
     expect(first.result.assetPath[0].age).toBe(35);
     expect(first.result.assetPath.at(-1)?.age).toBeCloseTo(85, 0);

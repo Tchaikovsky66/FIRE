@@ -10,6 +10,7 @@ export interface PensionBenefit {
   readonly annualGrowthRate?: number;
   /** Documents that a known benefit survives in the stop-purchasing plan. */
   readonly existingRights?: boolean;
+  readonly growth?: 'real' | 'nominal';
 }
 
 export interface ExternalIncome {
@@ -18,6 +19,7 @@ export interface ExternalIncome {
   readonly startMonth: number;
   readonly endMonth: number;
   readonly annualGrowthRate?: number;
+  readonly growth?: 'real' | 'nominal';
 }
 
 export interface InsurancePlanInput {
@@ -28,6 +30,7 @@ export interface InsurancePlanInput {
   readonly medicalSelfPayMonthly: number;
   readonly pension: PensionBenefit;
   readonly externalIncome: readonly ExternalIncome[];
+  readonly contributionGrowth?: 'real' | 'nominal';
 }
 
 export interface InsuranceComparisonInput {
@@ -35,6 +38,7 @@ export interface InsuranceComparisonInput {
   readonly endMonth: number;
   readonly retirementMonth: number;
   readonly plans: Record<InsurancePlanKey, InsurancePlanInput>;
+  readonly inflationRate?: number;
 }
 
 export interface InsuranceIssue {
@@ -108,22 +112,25 @@ const growth = (amount: number, annualRate: number | undefined, monthsSinceStart
   amount * Math.pow(1 + (annualRate ?? 0), monthsSinceStart / 12);
 
 function evaluatePlan(input: InsuranceComparisonInput, plan: InsurancePlanInput, key: InsurancePlanKey): InsurancePlanEvaluation {
-  if (plan.pension.status === 'unknown') {
+  if (plan.pension.status === 'unknown' || plan.pension.status === 'known' && (plan.pension.startMonth === undefined || plan.pension.monthlyAmount === undefined)) {
     return { kind: 'needs-input', issues: [{ code: 'missing', path: `plans.${key}.pension`, message: '请填写养老金待遇，或明确选择没有该项待遇' }] };
   }
   const rows: InsuranceRow[] = [];
   for (let month = input.startMonth; month < input.endMonth; month += 1) {
     const inContributionPeriod = key === 'continue' && month >= plan.contributionStartMonth && month < plan.contributionEndMonth;
     const listedContribution = inContributionPeriod ? plan.contributionMonthly : 0;
-    const contribution = plan.contributionsAlreadyDeducted ? 0 : listedContribution;
+    const inflation = Math.pow(1 + (input.inflationRate ?? 0), month / 12);
+    const alreadyDeducted = plan.contributionsAlreadyDeducted && month < input.retirementMonth;
+    const contribution = alreadyDeducted ? 0 : listedContribution * (plan.contributionGrowth === 'nominal' ? 1 : inflation);
     const pension = plan.pension.status === 'known' && month >= plan.pension.startMonth!
-      ? growth(plan.pension.monthlyAmount!, plan.pension.annualGrowthRate, month - plan.pension.startMonth!)
+      ? growth(plan.pension.monthlyAmount!, plan.pension.annualGrowthRate, month - plan.pension.startMonth!) * (plan.pension.growth === 'real' ? inflation : 1)
       : 0;
     const externalIncome = plan.externalIncome.reduce((total, income) => {
       if (month < income.startMonth || month >= income.endMonth) return total;
-      return total + growth(income.monthlyAmount, income.annualGrowthRate, month - income.startMonth);
+      return total + growth(income.monthlyAmount, income.annualGrowthRate, month - income.startMonth) * (income.growth === 'real' ? inflation : 1);
     }, 0);
-    rows.push({ month, listedContribution, contribution, contributionAlreadyDeducted: plan.contributionsAlreadyDeducted, medicalSelfPay: plan.medicalSelfPayMonthly, pensionIncome: pension, externalIncome, netInsuranceCashFlow: pension + externalIncome - contribution - plan.medicalSelfPayMonthly });
+    const medicalSelfPay = plan.medicalSelfPayMonthly * inflation;
+    rows.push({ month, listedContribution, contribution, contributionAlreadyDeducted: alreadyDeducted, medicalSelfPay, pensionIncome: pension, externalIncome, netInsuranceCashFlow: pension + externalIncome - contribution - medicalSelfPay });
   }
   return { kind: 'evaluated', rows };
 }
@@ -133,6 +140,7 @@ export function evaluateInsurancePlans(input: InsuranceComparisonInput): Insuran
   if (!Number.isInteger(input.startMonth) || !Number.isInteger(input.endMonth) || input.endMonth <= input.startMonth) common.push({ code: 'invalid', path: 'months', message: '规划月份范围无效' });
   if (!Number.isInteger(input.retirementMonth)) common.push({ code: 'invalid', path: 'retirementMonth', message: '退休月份必须是整数' });
   const issues = (['continue', 'stop'] as const).flatMap((key) => validatePlan(input, input.plans[key], key));
-  if (common.length || issues.length) return { kind: 'invalid', issues: [...common, ...issues] };
+  const invalid = issues.filter((issue) => issue.code !== 'missing');
+  if (common.length || invalid.length) return { kind: 'invalid', issues: [...common, ...invalid] };
   return { kind: 'evaluated', plans: { continue: evaluatePlan(input, input.plans.continue, 'continue'), stop: evaluatePlan(input, input.plans.stop, 'stop') } };
 }
