@@ -23,4 +23,11 @@ describe('versioned plan documents', () => {
     expect(decodePlanFile(v0)).toEqual({ kind: 'decoded', migrated: true, plan });
     expect(decodePlanFile({ ...v0, version: -1 }).kind).toBe('unsupported-version');
   });
+  it('validates partial nested drafts without accepting conflicts or impossible time ranges', () => {
+    const file = (draft: unknown) => ({ format: 'fire-plan', version: 1, plan: { ...plan, draft } });
+    expect(decodePlanFile(file({ targetAllocation: { stocks: 0.6 } })).kind).toBe('decoded');
+    expect(decodePlanFile(file({ currentAge: 30, desiredRetirementAge: 25 })).kind).toBe('invalid');
+    expect(decodePlanFile(file({ externalIncome: [{ id: 'rent', monthlyAmount: 1000, startMonth: 12, endMonth: 1 }] })).kind).toBe('invalid');
+    expect(decodePlanFile(file({ lifeEvents: [{ id: 'a', label: '结婚', month: 12, preRetirementAnnualBudget: 10000 }, { id: 'b', label: '生育', month: 12, preRetirementAnnualBudget: 20000 }] })).kind).toBe('invalid');
+  });
 });
