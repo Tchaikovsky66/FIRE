@@ -19,7 +19,7 @@ describe('scenario evaluation through Planning',()=>{
   expect(result(base,'continue','optimistic').stress).toBeUndefined();
  });
  it('applies pensions only from their actual month and keeps an unknown case separate',()=>{
-  const late={...none,pension:{status:'known' as const,startMonth:12,monthlyAmount:1000,growth:'nominal' as const}};
+  const late={...none,pension:{status:'known' as const,startMonth:12,monthlyAmount:1000,growth:'nominal' as const,amountBasis:'start-month' as const}};
   const r=result({...base,coveragePlans:{continue:late,stop:{...none,pension:{status:'unknown'}}}});
   expect(r.assetPath[11].pensionIncome).toBe(0);
   expect(r.assetPath[12].pensionIncome).toBe(1000);
@@ -56,4 +56,64 @@ describe('scenario evaluation through Planning',()=>{
   const e=evaluatePlan({...base,coveragePlans:undefined});if(e.kind!=='evaluated')throw Error('not evaluated');
   expect(e.cases.every(c=>c.outcome.kind==='needs-input')).toBe(true);expect(e.result).toBeUndefined();
  });
+});
+describe('review regressions through the public Planning seam', () => {
+ it('treats a future pension amount as today purchasing power before nominal growth',()=>{
+  const r=result({...base,inflationRate:.02,assets:{cash:100000,stocks:0,bonds:0,other:0},coveragePlans:{continue:{...none,pension:{status:'known',startMonth:12,monthlyAmount:1000,annualGrowthRate:0}},stop:none}});
+  expect(r.assetPath[11].pensionIncome).toBe(0);
+  expect(r.assetPath[12].pensionIncome).toBeCloseTo(1020);
+  expect(r.assetPath[23].pensionIncome).toBeCloseTo(1020);
+ });
+ it('tracks the stress minimum in actual purchasing power at its own month',()=>{
+  const r=result({...base,planningEndAge:50,annualLivingExpense:0,assets:{cash:100000,stocks:0,bonds:0,other:0},inflationRate:.02,cashBufferMonths:0});
+  expect(r.stress?.minimumBalance).toBe(100000);
+  expect(r.stress?.minimumRealBalance).toBeCloseTo(100000 / Math.pow(1.02,239/12), 5);
+  expect(r.stress?.minimumRealBalanceMonth).toBe(239);
+ });
+});
+
+
+describe('canonical cash flow and coverage regressions', () => {
+ it('pays cash first, transfers investments, and excludes housing and debt principal', () => {
+  const r=result({...base,desiredRetirementAge:31,cashBufferMonths:0,annualLivingExpense:1800,monthlyNetIncome:0,assets:{cash:100,stocks:300,bonds:100,other:0},targetAllocation:{cash:.2,stocks:.6,bonds:.2,other:0},selfOccupiedHomeValue:900000,debtBalance:500000});
+  expect(r.assetPath[0]).toMatchObject({cashUsed:100,balance:350,internalTransferNet:0});
+  expect(r.assetPath[0].investmentTransfer).toBeCloseTo(50);expect(r.assetPath[0].shortfall).toBeCloseTo(0);
+  expect(r.assetPath[3].shortfall).toBeCloseTo(100);
+  expect(r.assetPath[3].accounts).toEqual({cash:0,stocks:0,bonds:0,other:0});
+ });
+ it('keeps target allocation separate from current holdings and only allocates new surplus',()=>{
+  const r=result({...base,desiredRetirementAge:31,cashBufferMonths:0,annualLivingExpense:0,monthlyNetIncome:500,assets:{cash:100,stocks:300,bonds:100,other:0},targetAllocation:{cash:.2,stocks:.6,bonds:.2,other:0}});
+  expect(r.assetPath[0].openingAccounts).toEqual({cash:100,stocks:300,bonds:100,other:0});
+  expect(r.assetPath[0].accounts).toEqual({cash:200,stocks:600,bonds:200,other:0});
+  expect(r.assetPath[0].balance).toBe(1000);
+ });
+ it('keeps fixed event dates while changing independent work and retirement budgets',()=>{
+  const draft={...base,planningEndAge:33,annualLivingExpense:12000,retirementAnnualLivingExpense:24000,lifeEvents:[{id:'child',label:'孩子',month:6,preRetirementAnnualBudget:36000,postRetirementAnnualBudget:48000}]};
+  const early=result({...draft,desiredRetirementAge:31});const later=result({...draft,desiredRetirementAge:32});
+  expect(early.assetPath[6].livingExpense).toBe(3000);expect(later.assetPath[6].livingExpense).toBe(3000);
+  expect(early.assetPath[12].livingExpense).toBe(4000);expect(later.assetPath[12].livingExpense).toBe(3000);
+ });
+ it('does not double-charge payroll contributions and retains stop-plan pension rights and medical spending',()=>{
+  const plan={...none,contributionMonthly:1000,contributionEndMonth:24,contributionsAlreadyDeducted:true,medicalSelfPayMonthly:300,pension:{status:'known' as const,startMonth:12,monthlyAmount:1200,existingRights:true}};
+  const draft={...base,planningEndAge:33,desiredRetirementAge:31,coveragePlans:{continue:plan,stop:{...plan,medicalSelfPayMonthly:500}}};
+  const continuing=result(draft); const stopped=result(draft,'stop');
+  expect(continuing.assetPath[0].contribution).toBe(0);expect(continuing.assetPath[12].contribution).toBe(1000);
+  expect(stopped.assetPath[0].contribution).toBe(0);expect(stopped.assetPath[12]).toMatchObject({pensionIncome:1200,medicalSelfPay:500});
+ });
+});
+
+
+it('returns numeric errors instead of non-finite purchasing power when inflation underflows',()=>{
+ const evaluation=evaluatePlan({...base,currentAge:0,desiredRetirementAge:1,planningEndAge:150,inflationRate:-.9999999999999999,annualLivingExpense:0,monthlyNetIncome:0,cashBufferMonths:0});
+ expect(evaluation.kind).toBe('evaluated');if(evaluation.kind!=='evaluated')return;
+ expect(evaluation.cases.every(row=>row.outcome.kind==='unresolved'&&row.outcome.reason==='numeric-error')).toBe(true);
+});
+
+
+it.each([
+ ['today','nominal',1020,1020], ['today','real',1020,1040.4],
+ ['start-month','nominal',1000,1000], ['start-month','real',1000,1020],
+] as const)('applies pension %s amount basis with %s growth exactly once', (amountBasis,growth,start,nextYear)=>{
+ const r=result({...base,planningEndAge:33,inflationRate:.02,assets:{cash:100000,stocks:0,bonds:0,other:0},coveragePlans:{continue:{...none,pension:{status:'known',startMonth:12,monthlyAmount:1000,annualGrowthRate:0,amountBasis,growth}},stop:none}});
+ expect(r.assetPath[12].pensionIncome).toBeCloseTo(start);expect(r.assetPath[24].pensionIncome).toBeCloseTo(nextYear);
 });

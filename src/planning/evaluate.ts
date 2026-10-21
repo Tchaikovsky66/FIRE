@@ -18,6 +18,7 @@ export function evaluatePlan(draft: PlanDraft): PlanEvaluation {
     if((inputs.assets.other>0||inputs.targetAllocation.other>0)&&draft.annualReturn===undefined&&draft.returnScenarios?.[scenario]?.other===undefined&&!draft.otherReturnConfirmedZero)missing.push({code:'missing',path:`returnScenarios.${scenario}.other`,message:'请填写其他资产收益，或确认按零收益估计'});
     if(missing.length){cases.push({key:{coverage,returns:scenario},outcome:{kind:'needs-input',issues:missing}});continue;}
     const ctx=compileCase(inputs,coverage,scenario,retirementMonth);
+    if(ctx.flows.some(flow=>!Number.isFinite(1/flow.inflationFactor))){cases.push({key:{coverage,returns:scenario},outcome:{kind:'unresolved',reason:'numeric-error',message:'通胀换算超出有限数值范围'}});continue;}
     const target=solveTarget(ctx);
     if(target.kind==='unresolved'){cases.push({key:{coverage,returns:scenario},outcome:target});continue;}
     const pre=simulate(ctx,{endMonth:retirementMonth,collect:false});

@@ -10,6 +10,8 @@ export interface PensionBenefit {
   readonly annualGrowthRate?: number;
   /** Documents that a known benefit survives in the stop-purchasing plan. */
   readonly existingRights?: boolean;
+  /** Default input is today purchasing power; start-month is an explicit nominal estimate. */
+  readonly amountBasis?: 'today' | 'start-month';
   readonly growth?: 'real' | 'nominal';
 }
 
@@ -123,8 +125,9 @@ function evaluatePlan(input: InsuranceComparisonInput, plan: InsurancePlanInput,
     const inflation = Math.pow(1 + (input.inflationRate ?? 0), month / 12);
     const alreadyDeducted = plan.contributionsAlreadyDeducted && month < input.retirementMonth;
     const contribution = alreadyDeducted ? 0 : listedContribution * (plan.contributionGrowth === 'nominal' ? 1 : inflation);
+    const pensionStartFactor = Math.pow(1 + (input.inflationRate ?? 0), (plan.pension.startMonth ?? 0) / 12);
     const pension = plan.pension.status === 'known' && month >= plan.pension.startMonth!
-      ? growth(plan.pension.monthlyAmount!, plan.pension.annualGrowthRate, month - plan.pension.startMonth!) * (plan.pension.growth === 'real' ? inflation : 1)
+      ? growth(plan.pension.monthlyAmount!, plan.pension.annualGrowthRate, month - plan.pension.startMonth!) * (plan.pension.amountBasis === 'start-month' ? 1 : pensionStartFactor) * (plan.pension.growth === 'real' ? inflation / pensionStartFactor : 1)
       : 0;
     const externalIncome = plan.externalIncome.reduce((total, income) => {
       if (month < income.startMonth || month >= income.endMonth) return total;
