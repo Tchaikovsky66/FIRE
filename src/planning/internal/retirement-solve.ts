@@ -16,25 +16,25 @@ function referenceConstraint(ctx: CompiledCase): number {
 }
 
 /**
- * Scan the actual candidate months. The accumulation prefix is shared because
- * fixed events and all pre-retirement flows are independent of the candidate.
- * A forward simulation at available assets proves A >= the whole-path need;
- * there is no need to bisect that need at every candidate month.
+ * Scan the actual candidate months. Each candidate is simulated independently
+ * because cash-buffer replenishment at year boundaries can depend on the
+ * selected retirement month. This keeps the candidate's A(R) exact.
  */
 export function solveRetirementTiming(inputs: CompletePlanInputs, coverage: CoverageKey, scenario: ReturnScenario) {
   const endMonth = Math.round((inputs.planningEndAge - inputs.currentAge) * 12);
   const desiredMonth = Math.round((inputs.desiredRetirementAge - inputs.currentAge) * 12);
   const desiredCtx = compileCase(inputs, coverage, scenario, desiredMonth);
-  const accumulation = simulate(compileCase(inputs, coverage, scenario, endMonth));
   const numericIssue: SolverIssue = { kind: 'unresolved', reason: 'numeric-error', message: '当前假设导致非有限数值' };
   const boundIssue: SolverIssue = { kind: 'unresolved', reason: 'search-bound', message: '无法在当前搜索范围求解' };
   let attainment: Attainment = { kind: 'not-reached' };
   let earlierUnresolved: SolverIssue | undefined;
+  let earliestShortfall: { month: number; amount: number } | undefined;
   for (let month = 0; month < endMonth; month += 1) {
-    if (month > accumulation.path.length) { earlierUnresolved ??= numericIssue; break; }
-    if (accumulation.firstShortfall && accumulation.firstShortfall.month < month) break;
     const ctx = month === desiredMonth ? desiredCtx : compileCase(inputs, coverage, scenario, month);
-    const assets = month === 0 ? total(inputs.assets) : accumulation.path[month - 1].balance;
+    const pre = simulate(ctx, { endMonth: month, collect: false });
+    if (pre.numericError) { earlierUnresolved ??= numericIssue; continue; }
+    if (pre.firstShortfall) { earliestShortfall ??= pre.firstShortfall; continue; }
+    const assets = total(pre.finalAssets);
     const required = referenceConstraint(ctx);
     if (!Number.isFinite(required)) { earlierUnresolved ??= numericIssue; continue; }
     if (required > inputs.solverMaxAmount) { earlierUnresolved ??= boundIssue; continue; }
@@ -55,7 +55,7 @@ export function solveRetirementTiming(inputs: CompletePlanInputs, coverage: Cove
     break;
   }
   if (attainment.kind === 'not-reached') attainment = earlierUnresolved ?? {
-    kind: 'not-reached', ...(accumulation.firstShortfall ? { firstShortfall: accumulation.firstShortfall } : {}),
+    kind: 'not-reached', ...(earliestShortfall ? { firstShortfall: earliestShortfall } : {}),
   };
 
   const desiredTarget = solveTarget(desiredCtx);

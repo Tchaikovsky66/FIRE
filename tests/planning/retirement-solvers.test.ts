@@ -89,3 +89,27 @@ describe('non-monotonic retirement targets', () => {
     expect(result.attainment.month).toBe(1);
   });
 });
+
+describe('candidate-specific cash allocation', () => {
+  it('forward-validates attained assets using that candidate retirement time', () => {
+    const draft: PlanDraft = {
+      ...plan, planningEndAge: 45, desiredRetirementAge: 43, monthlyNetIncome: 1_000,
+      annualLivingExpense: 0, retirementAnnualLivingExpense: 12_000,
+      annualReturn: undefined, cashBufferMonths: 24,
+      targetAllocation: { cash: 0, stocks: 1, bonds: 0, other: 0 },
+      returnScenarios: {
+        conservative: { cash: 0, stocks: 1, bonds: 0, other: 0 },
+        baseline: { cash: 0, stocks: 1, bonds: 0, other: 0 },
+        optimistic: { cash: 0, stocks: 1, bonds: 0, other: 0 },
+      },
+    };
+    const reported = baseline(draft).attainment;
+    expect(reported.kind).toBe('future');
+    if (reported.kind !== 'future') return;
+    const candidate = baseline({ ...draft, desiredRetirementAge: reported.age });
+    expect(candidate.additionalContribution).toEqual({ kind: 'none', amount: 0 });
+    expect(candidate.firstShortfall).toBeUndefined();
+    const before = baseline({ ...draft, desiredRetirementAge: reported.age - 1 / 12 });
+    expect(before.additionalContribution.kind).toBe('monthly');
+  });
+});
