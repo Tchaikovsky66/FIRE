@@ -47,6 +47,11 @@ describe('scenario evaluation through Planning',()=>{
   expect(r.assetPath[12].livingExpense).toBeCloseTo(1100);
   expect(r.assetPath[12].externalIncome).toBe(100);
  });
+ it('treats omitted growth selection as nominal for external income and debt payments',()=>{
+  const r=result({...base,planningEndAge:33,inflationRate:.1,assets:{cash:100000,stocks:0,bonds:0,other:0},externalIncome:[{id:'rent',monthlyAmount:100,startMonth:0,endMonth:36,annualGrowthRate:0}],debtPayments:[{id:'mortgage',monthlyAmount:200,startMonth:0,endMonth:36}]});
+  expect(r.assetPath[12].externalIncome).toBe(100);
+  expect(r.assetPath[12].debtPayment).toBe(200);
+ });
  it('does not manufacture complete pension assumptions for omitted coverage',()=>{
   const e=evaluatePlan({...base,coveragePlans:undefined});if(e.kind!=='evaluated')throw Error('not evaluated');
   expect(e.cases.every(c=>c.outcome.kind==='needs-input')).toBe(true);expect(e.result).toBeUndefined();
