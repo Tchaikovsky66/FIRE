@@ -1,0 +1,78 @@
+import type { PlanDraft } from '../planning';
+
+export const PLAN_FILE_VERSION = 1;
+export type NamedPlan = { id: string; name: string; draft: PlanDraft; isExample?: boolean };
+export type PlanDocument = { format: 'fire-plan'; version: number; plan: NamedPlan };
+export type DecodeOutcome =
+  | { kind: 'decoded'; plan: NamedPlan; migrated: boolean }
+  | { kind: 'invalid'; message: string }
+  | { kind: 'unsupported-version'; message: string };
+
+type Validator = (value: unknown) => boolean;
+const number = (min = 0, max = 1e15): Validator => value => typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max;
+const rate: Validator = value => typeof value === 'number' && Number.isFinite(value) && value > -1 && value <= 100;
+const month: Validator = value => number(0, 1800)(value) && Number.isInteger(value);
+const text: Validator = value => typeof value === 'string' && value.trim().length > 0 && value.length <= 1000;
+const boolean: Validator = value => typeof value === 'boolean';
+const choice = (...allowed: string[]): Validator => value => typeof value === 'string' && allowed.includes(value);
+const object = (schema: Record<string, Validator>, required: readonly string[] = []): Validator => value => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  if (required.some(key => record[key] === undefined)) return false;
+  return Object.entries(record).every(([key, item]) => Object.hasOwn(schema, key) && (item === undefined || schema[key](item)));
+};
+const list = (validator: Validator): Validator => value => Array.isArray(value) && value.length <= 1000 && value.every(validator);
+const assets = object({ cash: number(), stocks: number(), bonds: number(), other: number() });
+const allocation = object({ cash: number(0, 1), stocks: number(0, 1), bonds: number(0, 1), other: number(0, 1) });
+const returns = object({ cash: rate, stocks: rate, bonds: rate, other: rate });
+const income = object({ id: text, label: text, monthlyAmount: number(), startMonth: month, endMonth: month, annualGrowthRate: rate, growth: choice('real', 'nominal') }, ['id', 'monthlyAmount', 'startMonth', 'endMonth']);
+const pension = object({ status: choice('unknown', 'none', 'known'), startMonth: month, monthlyAmount: number(), annualGrowthRate: rate, existingRights: boolean, growth: choice('real', 'nominal') }, ['status']);
+const insurance = object({ contributionMonthly: number(), contributionStartMonth: month, contributionEndMonth: month, contributionsAlreadyDeducted: boolean, medicalSelfPayMonthly: number(), pension, externalIncome: list(income), coverageNotes: text, contributionGrowth: choice('real', 'nominal'), medicalGrowth: choice('real', 'nominal') }, ['contributionMonthly', 'contributionStartMonth', 'contributionEndMonth', 'contributionsAlreadyDeducted', 'medicalSelfPayMonthly', 'pension', 'externalIncome']);
+const schema: Record<string, Validator> = {
+  currentAge: number(0, 150), desiredRetirementAge: number(0, 150), planningEndAge: number(0, 150),
+  annualLivingExpense: number(), retirementAnnualLivingExpense: number(), annualRigidExpense: number(), retirementAnnualRigidExpense: number(), monthlyNetIncome: number(), assets,
+  annualReturn: rate, inflationRate: rate, withdrawalRate: value => number(0, 1)(value) && value !== 0,
+  baseMonth: value => typeof value === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(value), scope: choice('individual', 'household'), cashBufferMonths: month,
+  stockShock: number(0, 1), bondShock: number(0, 1), targetAllocation: allocation, returnScenarios: object({ conservative: returns, baseline: returns, optimistic: returns }), otherReturnConfirmedZero: boolean,
+  lifeEvents: list(object({ id: text, label: text, month, preRetirementAnnualBudget: number(), postRetirementAnnualBudget: number() }, ['id', 'label', 'month'])),
+  oneOffExpenses: list(object({ id: text, label: text, month, amount: number() }, ['id', 'label', 'month', 'amount'])),
+  debtPayments: list(object({ id: text, label: text, startMonth: month, endMonth: month, monthlyAmount: number(), growth: choice('real', 'nominal') }, ['id', 'startMonth', 'endMonth', 'monthlyAmount'])),
+  coveragePlans: object({ continue: insurance, stop: insurance }), externalIncome: list(income), salaryRealGrowthRate: rate, salaryStartMonth: month, salaryEndMonth: month,
+  selfOccupiedHomeValue: number(), rentalPropertyValue: number(), debtBalance: number(), manualTarget: number(), solverMaxAmount: value => number()(value) && value !== 0,
+};
+export function validatePlanDraft(draft: unknown): draft is PlanDraft { return object(schema)(draft); }
+
+export function encodePlanFile(plan: NamedPlan): string {
+  return JSON.stringify({ format: 'fire-plan', version: PLAN_FILE_VERSION, plan: { id: plan.id, name: plan.name, draft: plan.draft, ...(plan.isExample ? { isExample: true } : {}) } } satisfies PlanDocument, null, 2);
+}
+
+export function decodePlanFile(value: unknown): DecodeOutcome {
+  let parsed: unknown;
+  try { parsed = typeof value === 'string' ? JSON.parse(value) : value; } catch { return { kind: 'invalid', message: '方案文件不是有效 JSON。' }; }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { kind: 'invalid', message: '方案文件结构无效。' };
+  const record = parsed as Record<string, unknown>;
+  if (record.format !== 'fire-plan') return { kind: 'invalid', message: '无法识别方案文件类型。' };
+  if (typeof record.version !== 'number' || !Number.isInteger(record.version)) return { kind: 'invalid', message: '方案文件版本无效。' };
+  if (record.version > PLAN_FILE_VERSION || record.version < 0) return { kind: 'unsupported-version', message: '当前版本不支持此方案文件版本。' };
+  if (!record.plan || typeof record.plan !== 'object' || Array.isArray(record.plan)) return { kind: 'invalid', message: '缺少方案内容。' };
+  const source = record.plan as Record<string, unknown>;
+  const draft = record.version === 0 ? source.inputs : source.draft;
+  if (!text(source.id) || !text(source.name) || (source.isExample !== undefined && !boolean(source.isExample)) || !validatePlanDraft(draft)) return { kind: 'invalid', message: '方案身份或输入值无效。' };
+  return { kind: 'decoded', plan: { id: source.id as string, name: source.name as string, draft: structuredClone(draft), ...(source.isExample === true ? { isExample: true } : {}) }, migrated: record.version < PLAN_FILE_VERSION };
+}
+
+export type Workspace = { plans: readonly NamedPlan[]; activePlanId: string };
+const uniqueId = (base: string, plans: readonly NamedPlan[]) => { let id = base; let i = 2; while (plans.some(plan => plan.id === id)) id = `${base}-${i++}`; return id; };
+export function createWorkspace(plan: NamedPlan): Workspace { return { plans: [structuredClone(plan)], activePlanId: plan.id }; }
+export function appendPlan(workspace: Workspace, plan: NamedPlan): Workspace {
+  const id = uniqueId(plan.id, workspace.plans);
+  return { plans: [...workspace.plans, { ...structuredClone(plan), id }], activePlanId: id };
+}
+export function copyPlan(workspace: Workspace, id: string): Workspace {
+  const source = workspace.plans.find(plan => plan.id === id); if (!source) return workspace;
+  const nextId = uniqueId(`${source.id}-copy`, workspace.plans); const copy = { ...source, id: nextId, name: `${source.name} 副本`, draft: structuredClone(source.draft), isExample: false };
+  return { plans: [...workspace.plans, copy], activePlanId: nextId };
+}
+export function renamePlan(workspace: Workspace, id: string, name: string): Workspace { return { ...workspace, plans: workspace.plans.map(plan => plan.id === id ? { ...plan, name } : plan) }; }
+export function selectPlan(workspace: Workspace, id: string): Workspace { return workspace.plans.some(plan => plan.id === id) ? { ...workspace, activePlanId: id } : workspace; }
+
