@@ -101,3 +101,19 @@ describe('canonical cash flow and coverage regressions', () => {
   expect(stopped.assetPath[0].contribution).toBe(0);expect(stopped.assetPath[12]).toMatchObject({pensionIncome:1200,medicalSelfPay:500});
  });
 });
+
+
+it('returns numeric errors instead of non-finite purchasing power when inflation underflows',()=>{
+ const evaluation=evaluatePlan({...base,currentAge:0,desiredRetirementAge:1,planningEndAge:150,inflationRate:-.9999999999999999,annualLivingExpense:0,monthlyNetIncome:0,cashBufferMonths:0});
+ expect(evaluation.kind).toBe('evaluated');if(evaluation.kind!=='evaluated')return;
+ expect(evaluation.cases.every(row=>row.outcome.kind==='unresolved'&&row.outcome.reason==='numeric-error')).toBe(true);
+});
+
+
+it.each([
+ ['today','nominal',1020,1020], ['today','real',1020,1040.4],
+ ['start-month','nominal',1000,1000], ['start-month','real',1000,1020],
+] as const)('applies pension %s amount basis with %s growth exactly once', (amountBasis,growth,start,nextYear)=>{
+ const r=result({...base,planningEndAge:33,inflationRate:.02,assets:{cash:100000,stocks:0,bonds:0,other:0},coveragePlans:{continue:{...none,pension:{status:'known',startMonth:12,monthlyAmount:1000,annualGrowthRate:0,amountBasis,growth}},stop:none}});
+ expect(r.assetPath[12].pensionIncome).toBeCloseTo(start);expect(r.assetPath[24].pensionIncome).toBeCloseTo(nextYear);
+});
