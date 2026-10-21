@@ -1,6 +1,7 @@
 {
   "name": "fire-planner",
   "version": "1.0.0",
+  "type": "module",
   "description": "一个通过引导式输入和实时图形，帮助个人或家庭理解提前退休资金与时间需求的网页小程序。",
   "main": "index.js",
   "directories": {
