@@ -15,6 +15,7 @@ export interface PensionBenefit {
 
 export interface ExternalIncome {
   readonly id: string;
+  readonly label?: string;
   readonly monthlyAmount: number;
   readonly startMonth: number;
   readonly endMonth: number;
