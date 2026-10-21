@@ -1,7 +1,7 @@
 import { StrictMode, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { evaluatePlan, type PlanDraft, type PlanEvaluation, type EvaluatedPlan } from './planning';
-import { encodePlanFile, decodePlanFile, copyPlan, createWorkspace, type Workspace, type NamedPlan } from './plan-documents';
+import { encodePlanFile, decodePlanFile, copyPlan, createWorkspace, type Workspace, type NamedPlan, validatePlanDraft } from './plan-documents';
 import { restoreWorkspace, saveWorkspace } from './local-persistence';
 import { renderMarkdownReport } from './report';
 import { Results, EvaluationIssues, attainmentText, contributionText } from './workbench/Results';
@@ -18,12 +18,13 @@ function examplePlan(): NamedPlan {
 function download(text: string, name: string, type: string) {
   const url = URL.createObjectURL(new Blob([text], { type })); const anchor = document.createElement('a'); anchor.href = url; anchor.download = name; anchor.click(); setTimeout(() => URL.revokeObjectURL(url), 500);
 }
-function loadInitial(): { workspace: Workspace; message: string } {
-  try { const restored = restoreWorkspace(window.localStorage); if (restored.kind === 'restored') return { workspace: restored.workspace, message: '已从本地恢复，按当前模型重新计算' }; return { workspace: createWorkspace(blankPlan()), message: restored.kind === 'error' ? restored.message : '' }; } catch { return { workspace: createWorkspace(blankPlan()), message: '本地存储不可用，当前方案仍可编辑并导出' }; }
+function loadInitial(): { workspace: Workspace; message: string; blocked: boolean } {
+  try { const restored = restoreWorkspace(window.localStorage); if (restored.kind === 'restored') return { workspace: restored.workspace, message: '已从本地恢复，按当前模型重新计算', blocked: false }; return { workspace: createWorkspace(blankPlan()), message: restored.kind === 'error' ? `${restored.message} 原始本地数据已保留；新建或导入后才重新保存。` : '', blocked: restored.kind === 'error' }; } catch { return { workspace: createWorkspace(blankPlan()), message: '本地存储不可用，当前方案仍可编辑并导出', blocked: true }; }
 }
 function App() {
   const [initial] = useState(loadInitial);
   const [workspace, setWorkspace] = useState(initial.workspace);
+  const [persistenceBlocked, setPersistenceBlocked] = useState(initial.blocked);
   const [step, setStep] = useState(0);
   const [message, setMessage] = useState(initial.message);
   const [saved, setSaved] = useState('正在保存');
@@ -36,31 +37,44 @@ function App() {
   const fileInput = useRef<HTMLInputElement>(null);
   const revision = useRef(0);
   const inputAt = useRef(performance.now());
+  const worker = useRef<Worker | null>(null);
   const active = workspace.plans.find(plan => plan.id === workspace.activePlanId) ?? workspace.plans[0];
   const cache = useRef(new Map<string, EvaluatedPlan>());
+  useEffect(() => {
+    const instance = new Worker(new URL('./planning/worker.ts', import.meta.url), { type: 'module' });
+    worker.current = instance;
+    instance.onmessage = (event: MessageEvent<{ revision: number; planId: string; evaluation?: PlanEvaluation; error?: string }>) => {
+      if (event.data.revision !== revision.current) return;
+      setPending(false); setLatency(performance.now() - inputAt.current);
+      if (event.data.error) { setMessage(event.data.error); return; }
+      const next = event.data.evaluation!;
+      setEvaluation(next);
+      if (next.kind === 'evaluated') { cache.current.set(event.data.planId, next); setLastValid(next); }
+    };
+    instance.onerror = () => { setPending(false); setMessage('后台计算不可用，输入仍在内存中，请导出备份后重新载入。'); };
+    return () => { instance.terminate(); worker.current = null; };
+  }, []);
   useEffect(() => {
     const currentRevision = ++revision.current;
     setPending(true); setEvaluation(undefined); setLastValid(cache.current.get(active.id));
     const timer = setTimeout(() => {
-      const next = evaluatePlan(active.draft);
-      if (currentRevision !== revision.current) return;
-      setEvaluation(next); setPending(false); setLatency(performance.now() - inputAt.current);
-      if (next.kind === 'evaluated') { cache.current.set(active.id, next); setLastValid(next); }
+      worker.current?.postMessage({ revision: currentRevision, planId: active.id, draft: active.draft });
     }, 80);
     return () => clearTimeout(timer);
   }, [active.id, active.draft]);
   useEffect(() => {
+    if (persistenceBlocked) { setSaved('未保存：原始本地数据已保留，可新建或导入'); return; }
     const timer = setTimeout(() => { try { const result = saveWorkspace(window.localStorage, workspace); setSaved(result.kind === 'saved' ? '已保存在此浏览器' : result.message); } catch { setSaved('未保存：本地存储不可用，请导出备份'); } }, 180);
     return () => clearTimeout(timer);
-  }, [workspace]);
+  }, [workspace, persistenceBlocked]);
   useEffect(() => {
     const plan = workspace.plans.find(row => row.id === compareId); if (!plan) { setComparison(undefined); return; }
     const timer = setTimeout(() => { const next = evaluatePlan(plan.draft); setComparison(next.kind === 'evaluated' ? next : undefined); }, 100);
     return () => clearTimeout(timer);
   }, [compareId, workspace.plans]);
-  const patch = (value: Partial<PlanDraft>) => { inputAt.current = performance.now(); setPending(true); setWorkspace(current => ({ ...current, plans: current.plans.map(plan => plan.id === active.id ? { ...plan, draft: { ...plan.draft, ...value } } : plan) })); };
-  const append = (plan: NamedPlan) => { inputAt.current = performance.now(); setWorkspace(current => ({ plans: [...current.plans, plan], activePlanId: plan.id })); setStep(0); };
-  const exportJson = () => { download(encodePlanFile(active), `FIRE-${active.name}.json`, 'application/json'); setMessage('JSON 备份已生成，包含输入和假设，不包含旧计算缓存。'); };
+  const patch = (value: Partial<PlanDraft>) => { inputAt.current = performance.now(); revision.current += 1; setPending(true); setWorkspace(current => ({ ...current, plans: current.plans.map(plan => plan.id === active.id ? { ...plan, draft: { ...plan.draft, ...value } } : plan) })); };
+  const append = (plan: NamedPlan) => { setPersistenceBlocked(false); inputAt.current = performance.now(); revision.current += 1; setWorkspace(current => ({ plans: [...current.plans, plan], activePlanId: plan.id })); setStep(0); };
+  const exportJson = () => { if (!validatePlanDraft(active.draft)) { setMessage('请先完成或修正无效数字，再导出有效方案；最后已保存的数据仍被保留。'); return; } download(encodePlanFile(active), `FIRE-${active.name}.json`, 'application/json'); setMessage('JSON 备份已生成，包含输入和假设，不包含旧计算缓存。'); };
   const exportReport = () => { if (pending || !evaluation || evaluation.kind !== 'evaluated') return; download(renderMarkdownReport(evaluation), `FIRE-${active.name}.md`, 'text/markdown;charset=utf-8'); setMessage('Markdown 报告已从当前同一评估快照生成。'); };
   const evaluated = evaluation?.kind === 'evaluated' ? evaluation : lastValid;
   const stale = pending || evaluation?.kind !== 'evaluated';
@@ -69,7 +83,7 @@ function App() {
   const summaryResult = evaluated?.cases.find(row => row.key.coverage === 'continue' && row.key.returns === 'baseline')?.outcome;
   return <main className="app">
     <header className="app-header"><a className="brand" href="#" aria-label="FIRE 规划首页"><span className="brand-mark">F</span> FIRE<span className="brand-desc">自由，从算清开始</span></a><span className="local-label">本地规划 · 无需账号</span></header>
-    <div className="workspace-toolbar"><div className="plan-picker"><label htmlFor="plan-select">当前方案</label><select id="plan-select" aria-label="当前方案" value={active.id} onChange={e => { inputAt.current = performance.now(); setWorkspace(current => ({ ...current, activePlanId: e.target.value })); setStep(0); }}>{workspace.plans.map(plan => <option key={plan.id} value={plan.id}>{plan.name}{plan.isExample ? '（示例）' : ''}</option>)}</select><span className="save-indicator" role="status">{saved}</span></div><div className="toolbar-actions"><button type="button" onClick={() => append(blankPlan())}>新建</button><button type="button" onClick={() => { inputAt.current = performance.now(); setWorkspace(current => copyPlan(current, active.id)); }}>复制</button><button type="button" onClick={exportJson}>导出 JSON</button><button type="button" onClick={() => fileInput.current?.click()}>导入</button></div></div>
+    <div className="workspace-toolbar"><div className="plan-picker"><label htmlFor="plan-select">当前方案</label><select id="plan-select" aria-label="当前方案" value={active.id} onChange={e => { inputAt.current = performance.now(); revision.current += 1; setWorkspace(current => ({ ...current, activePlanId: e.target.value })); setStep(0); }}>{workspace.plans.map(plan => <option key={plan.id} value={plan.id}>{plan.name}{plan.isExample ? '（示例）' : ''}</option>)}</select><span className="save-indicator" role="status">{saved}</span></div><div className="toolbar-actions"><button type="button" onClick={() => append(blankPlan())}>新建</button><button type="button" onClick={() => { inputAt.current = performance.now(); revision.current += 1; setWorkspace(current => copyPlan(current, active.id)); }}>复制</button><button type="button" onClick={exportJson}>导出 JSON</button><button type="button" onClick={() => fileInput.current?.click()}>导入</button></div></div>
     <input ref={fileInput} aria-label="导入 JSON 文件" type="file" accept="application/json,.json" hidden onChange={async e => { const file = e.target.files?.[0]; if (!file) return; try { const decoded = decodePlanFile(await file.text()); if (decoded.kind !== 'decoded') { setMessage(`导入失败：${decoded.message}`); } else { append({ ...decoded.plan, id: crypto.randomUUID(), name: `${decoded.plan.name}（导入副本）` }); setMessage('已导入为新副本，现有方案已保留。'); } } catch { setMessage('导入失败：无法读取文件。现有方案已保留。'); } e.target.value = ''; }} />
     {message && <div className="notice" role="status"><span>{message}</span><button type="button" aria-label="关闭提示" onClick={() => setMessage('')}>×</button></div>}
     <div className="page-heading"><div><span className="section-number">FIRE PLANNER / 01</span><h1>你的生活，<br />由你来安排。</h1><p>从今天的收支，到未来的选择。用一条路径，理解退休需要的资金与时间。</p></div><div className="heading-aside"><span>一份方案，三个问题</span><p>需要多少资金<br />何时满足条件<br />每月还需投入多少</p></div></div>
@@ -83,7 +97,7 @@ function App() {
           <div className="step-actions"><button type="button" className="secondary" disabled={step === 0} onClick={() => setStep(n => n - 1)}>上一步</button><span>{step + 1} / 6</span><button type="button" className="primary" disabled={step === 5} onClick={() => setStep(n => n + 1)}>下一步 →</button></div>
         </form>
         {evaluation && <EvaluationIssues evaluation={evaluation} />}
-        <p className="latency" data-testid="evaluation-latency">{latency === undefined ? '等待输入' : `最近一次输入 → 有效评估 ${Math.round(latency)} ms`}</p>
+        <p className="latency" data-testid="evaluation-latency">{latency === undefined ? '等待输入' : `最近一次输入 → ${evaluation?.kind === 'evaluated' ? '有效评估' : '输入校验'} ${Math.round(latency)} ms`}</p>
       </section>
       <Results evaluation={evaluated} stale={stale} pending={pending} />
     </div><footer><span>FIRE · 财务独立与提前退休规划</span><span>人民币 · 按月计算 · 数据保存在你的浏览器</span></footer>
