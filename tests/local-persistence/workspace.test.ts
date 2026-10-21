@@ -26,12 +26,12 @@ describe('local workspace persistence', () => {
     expect(saveWorkspace(adapter, createWorkspace({ ...plan, draft: { currentAge: NaN } })).kind).toBe('unsaved');
     expect(adapter.data.size).toBe(0);
   });
-  it('re-evaluates restored inputs and reports quota failure without changing the workspace', () => {
+  it('restores inputs without synchronously evaluating them and reports quota failure', () => {
     const adapter = storage(); const workspace = createWorkspace(plan);
     saveWorkspace(adapter, workspace);
     const restored = restoreWorkspace(adapter);
     expect(restored.kind).toBe('restored');
-    if (restored.kind === 'restored') expect(restored.evaluations.p.kind).toBe('needs-input');
+    expect(restored).toEqual({ kind: 'restored', workspace });
     const quota: StorageLike = { ...adapter, setItem: () => { throw new DOMException('Full', 'QuotaExceededError'); } };
     expect(saveWorkspace(quota, workspace)).toMatchObject({ kind: 'unsaved', reason: 'quota' });
     expect(workspace.plans[0].draft.currentAge).toBe(30);

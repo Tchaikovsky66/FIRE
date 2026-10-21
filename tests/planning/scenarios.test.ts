@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { evaluatePlan, type PlanDraft } from '../../src/planning';
 const none = {contributionMonthly:0, contributionStartMonth:0, contributionEndMonth:120, contributionsAlreadyDeducted:false, medicalSelfPayMonthly:0, pension:{status:'none' as const}, externalIncome:[]};
-const base: PlanDraft = {currentAge:30, desiredRetirementAge:30, planningEndAge:32, annualLivingExpense:12000, monthlyNetIncome:0,assets:{cash:24000,stocks:0,bonds:0,other:0},annualReturn:0,inflationRate:0,withdrawalRate:1,cashBufferMonths:12,coveragePlans:{continue:none,stop:none}};
+const base: PlanDraft = {currentAge:30, desiredRetirementAge:30, planningEndAge:32, annualLivingExpense:12000, retirementAnnualLivingExpense:12000, monthlyNetIncome:0,assets:{cash:24000,stocks:0,bonds:0,other:0},annualReturn:0,inflationRate:0,withdrawalRate:1,cashBufferMonths:12,coveragePlans:{continue:none,stop:none}};
 function result(draft:PlanDraft=base, coverage='continue', returns='baseline') {
  const e=evaluatePlan(draft); expect(e.kind).toBe('evaluated'); if(e.kind!=='evaluated')throw Error('not evaluated');
  const c=e.cases.find(c=>c.key.coverage===coverage&&c.key.returns===returns); expect(c?.outcome.kind).toBe('evaluated'); if(c?.outcome.kind!=='evaluated')throw Error('not case'); return c.outcome.result;
@@ -35,7 +35,7 @@ describe('scenario evaluation through Planning',()=>{
   expect(r.assetPath.every(p=>p.balance>=0)).toBe(true);
  });
  it('uses independent asset returns and skips only shocked stock and bond returns',()=>{
-  const r=result({...base,planningEndAge:31,annualLivingExpense:0,annualReturn:undefined,cashBufferMonths:0,assets:{cash:1000,stocks:1000,bonds:1000,other:0},targetAllocation:{cash:1/3,stocks:1/3,bonds:1/3,other:0},returnScenarios:{baseline:{cash:.12682503013196977,stocks:.12682503013196977,bonds:.12682503013196977,other:0}},stockShock:.65,bondShock:.95});
+  const r=result({...base,planningEndAge:31,annualLivingExpense:0,retirementAnnualLivingExpense:0,annualReturn:undefined,cashBufferMonths:0,assets:{cash:1000,stocks:1000,bonds:1000,other:0},targetAllocation:{cash:1/3,stocks:1/3,bonds:1/3,other:0},returnScenarios:{baseline:{cash:.12682503013196977,stocks:.12682503013196977,bonds:.12682503013196977,other:0}},stockShock:.65,bondShock:.95});
   expect(r.stress?.path[0].accounts.cash).toBeCloseTo(1010,6);
   expect(r.stress?.path[0].accounts.stocks).toBeCloseTo(650,6);
   expect(r.stress?.path[0].accounts.bonds).toBeCloseTo(950,6);
@@ -65,7 +65,7 @@ describe('review regressions through the public Planning seam', () => {
   expect(r.assetPath[23].pensionIncome).toBeCloseTo(1020);
  });
  it('tracks the stress minimum in actual purchasing power at its own month',()=>{
-  const r=result({...base,planningEndAge:50,annualLivingExpense:0,assets:{cash:100000,stocks:0,bonds:0,other:0},inflationRate:.02,cashBufferMonths:0});
+  const r=result({...base,planningEndAge:50,annualLivingExpense:0,retirementAnnualLivingExpense:0,assets:{cash:100000,stocks:0,bonds:0,other:0},inflationRate:.02,cashBufferMonths:0});
   expect(r.stress?.minimumBalance).toBe(100000);
   expect(r.stress?.minimumRealBalance).toBeCloseTo(100000 / Math.pow(1.02,239/12), 5);
   expect(r.stress?.minimumRealBalanceMonth).toBe(239);
@@ -75,14 +75,14 @@ describe('review regressions through the public Planning seam', () => {
 
 describe('canonical cash flow and coverage regressions', () => {
  it('pays cash first, transfers investments, and excludes housing and debt principal', () => {
-  const r=result({...base,desiredRetirementAge:31,cashBufferMonths:0,annualLivingExpense:1800,monthlyNetIncome:0,assets:{cash:100,stocks:300,bonds:100,other:0},targetAllocation:{cash:.2,stocks:.6,bonds:.2,other:0},selfOccupiedHomeValue:900000,debtBalance:500000});
+  const r=result({...base,desiredRetirementAge:31,cashBufferMonths:0,annualLivingExpense:1800,retirementAnnualLivingExpense:1800,monthlyNetIncome:0,assets:{cash:100,stocks:300,bonds:100,other:0},targetAllocation:{cash:.2,stocks:.6,bonds:.2,other:0},selfOccupiedHomeValue:900000,debtBalance:500000});
   expect(r.assetPath[0]).toMatchObject({cashUsed:100,balance:350,internalTransferNet:0});
   expect(r.assetPath[0].investmentTransfer).toBeCloseTo(50);expect(r.assetPath[0].shortfall).toBeCloseTo(0);
   expect(r.assetPath[3].shortfall).toBeCloseTo(100);
   expect(r.assetPath[3].accounts).toEqual({cash:0,stocks:0,bonds:0,other:0});
  });
  it('keeps target allocation separate from current holdings and only allocates new surplus',()=>{
-  const r=result({...base,desiredRetirementAge:31,cashBufferMonths:0,annualLivingExpense:0,monthlyNetIncome:500,assets:{cash:100,stocks:300,bonds:100,other:0},targetAllocation:{cash:.2,stocks:.6,bonds:.2,other:0}});
+  const r=result({...base,desiredRetirementAge:31,cashBufferMonths:0,annualLivingExpense:0,retirementAnnualLivingExpense:0,monthlyNetIncome:500,assets:{cash:100,stocks:300,bonds:100,other:0},targetAllocation:{cash:.2,stocks:.6,bonds:.2,other:0}});
   expect(r.assetPath[0].openingAccounts).toEqual({cash:100,stocks:300,bonds:100,other:0});
   expect(r.assetPath[0].accounts).toEqual({cash:200,stocks:600,bonds:200,other:0});
   expect(r.assetPath[0].balance).toBe(1000);
@@ -104,7 +104,7 @@ describe('canonical cash flow and coverage regressions', () => {
 
 
 it('returns numeric errors instead of non-finite purchasing power when inflation underflows',()=>{
- const evaluation=evaluatePlan({...base,currentAge:0,desiredRetirementAge:1,planningEndAge:150,inflationRate:-.9999999999999999,annualLivingExpense:0,monthlyNetIncome:0,cashBufferMonths:0});
+ const evaluation=evaluatePlan({...base,currentAge:0,desiredRetirementAge:1,planningEndAge:150,inflationRate:-.9999999999999999,annualLivingExpense:0,retirementAnnualLivingExpense:0,monthlyNetIncome:0,cashBufferMonths:0});
  expect(evaluation.kind).toBe('evaluated');if(evaluation.kind!=='evaluated')return;
  expect(evaluation.cases.every(row=>row.outcome.kind==='unresolved'&&row.outcome.reason==='numeric-error')).toBe(true);
 });
@@ -119,8 +119,33 @@ it.each([
 });
 
 it('preserves numeric-error when future real income overflows inside target simulation',()=>{
- const evaluation=evaluatePlan({...base,currentAge:0,desiredRetirementAge:1,planningEndAge:150,annualLivingExpense:0,monthlyNetIncome:0,assets:{cash:100000,stocks:0,bonds:0,other:0},annualReturn:0,inflationRate:10,cashBufferMonths:0,externalIncome:[{id:'extreme',monthlyAmount:1e15,startMonth:0,endMonth:1800,annualGrowthRate:10,growth:'real'}]});
+ const evaluation=evaluatePlan({...base,currentAge:0,desiredRetirementAge:1,planningEndAge:150,annualLivingExpense:0,retirementAnnualLivingExpense:0,monthlyNetIncome:0,assets:{cash:100000,stocks:0,bonds:0,other:0},annualReturn:0,inflationRate:10,cashBufferMonths:0,externalIncome:[{id:'extreme',monthlyAmount:1e15,startMonth:0,endMonth:1800,annualGrowthRate:10,growth:'real'}]});
  expect(evaluation.kind).toBe('evaluated');if(evaluation.kind!=='evaluated')return;
  expect(evaluation.cases).toHaveLength(6);
  for(const row of evaluation.cases)expect(row.outcome).toMatchObject({kind:'unresolved',reason:'numeric-error'});
+});
+
+it('charges independent contributions after employment ends before retirement', () => {
+ const r = result({...base, desiredRetirementAge:32, planningEndAge:33,
+  annualLivingExpense:0,retirementAnnualLivingExpense:0, monthlyNetIncome:500, salaryEndMonth:12,
+  assets:{cash:0,stocks:0,bonds:0,other:0}, cashBufferMonths:0,
+  coveragePlans:{continue:{...none, contributionMonthly:1000,
+   contributionEndMonth:24, contributionsAlreadyDeducted:true},stop:none}});
+ expect(r.assetPath[11].contribution).toBe(0);
+ expect(r.assetPath[12].contribution).toBe(1000);
+ expect(r.firstShortfall).toEqual({month:18,amount:1000});
+ expect(r.additionalContribution).toMatchObject({kind:'monthly',amount:250});
+});
+
+
+it('charges self-paid contributions before work starts and after the selected retirement month', () => {
+  const r = result({ ...base, desiredRetirementAge: 31, planningEndAge: 32,
+    annualLivingExpense: 0, retirementAnnualLivingExpense: 0, monthlyNetIncome: 0,
+    salaryStartMonth: 3, salaryEndMonth: 24, cashBufferMonths: 0,
+    assets: { cash: 24000, stocks: 0, bonds: 0, other: 0 },
+    coveragePlans: { continue: { ...none, contributionMonthly: 1000, contributionEndMonth: 24, contributionsAlreadyDeducted: true }, stop: none } });
+  expect(r.assetPath[2].contribution).toBe(1000);
+  expect(r.assetPath[3].contribution).toBe(0);
+  expect(r.assetPath[11].contribution).toBe(0);
+  expect(r.assetPath[12].contribution).toBe(1000);
 });

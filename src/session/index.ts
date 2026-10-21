@@ -38,7 +38,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
 
 type PlanSource = { id: string; draft: PlanDraft };
 type WorkerReply = { revision: number; planId: string; evaluation?: PlanEvaluation; error?: string };
-export function usePlanningSession(plan: PlanSource | undefined) {
+export function usePlanningSession(plan: PlanSource | undefined, blocked = false) {
   const [state, dispatch] = useReducer(sessionReducer, undefined, createSession);
   const revision = useRef(0);
   const inputAt = useRef(performance.now());
@@ -64,10 +64,11 @@ export function usePlanningSession(plan: PlanSource | undefined) {
     const currentRevision = ++revision.current;
     inputAt.current = performance.now();
     dispatch({ type: 'begin', planId: plan.id, revision: currentRevision });
+    if (blocked) return;
     const timer = setTimeout(() => worker.current?.postMessage({ revision: currentRevision, planId: plan.id, draft: plan.draft }), 80);
     return () => clearTimeout(timer);
-  }, [plan?.id, plan?.draft]);
+  }, [plan?.id, plan?.draft, blocked]);
   // Never lend another plan's result to a newly selected identity before effects run.
   const current = state.planId === plan?.id ? state : { ...state, evaluation: undefined, lastValid: undefined, pending: true };
-  return { ...current, markInput };
+  return { ...current, ...(blocked ? { evaluation: undefined, pending: false } : {}), markInput };
 }

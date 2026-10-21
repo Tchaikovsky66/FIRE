@@ -40,6 +40,9 @@ export interface InsuranceComparisonInput {
   readonly startMonth: number;
   readonly endMonth: number;
   readonly retirementMonth: number;
+  /** Employment interval used to distinguish payroll-deducted contributions from self-paid contributions. */
+  readonly employmentStartMonth?: number;
+  readonly employmentEndMonth?: number;
   readonly plans: Record<InsurancePlanKey, InsurancePlanInput>;
   readonly inflationRate?: number;
 }
@@ -123,7 +126,9 @@ function evaluatePlan(input: InsuranceComparisonInput, plan: InsurancePlanInput,
     const inContributionPeriod = key === 'continue' && month >= plan.contributionStartMonth && month < plan.contributionEndMonth;
     const listedContribution = inContributionPeriod ? plan.contributionMonthly : 0;
     const inflation = Math.pow(1 + (input.inflationRate ?? 0), month / 12);
-    const alreadyDeducted = plan.contributionsAlreadyDeducted && month < input.retirementMonth;
+    const employmentStart = input.employmentStartMonth ?? 0;
+    const employmentEnd = Math.min(input.employmentEndMonth ?? input.retirementMonth, input.retirementMonth);
+    const alreadyDeducted = plan.contributionsAlreadyDeducted && month >= employmentStart && month < employmentEnd;
     const contribution = alreadyDeducted ? 0 : listedContribution * (plan.contributionGrowth === 'nominal' ? 1 : inflation);
     const pensionStartFactor = Math.pow(1 + (input.inflationRate ?? 0), (plan.pension.startMonth ?? 0) / 12);
     const pension = plan.pension.status === 'known' && month >= plan.pension.startMonth!

@@ -6,6 +6,7 @@ const validPlan: PlanDraft = {
   desiredRetirementAge: 60,
   planningEndAge: 85,
   annualLivingExpense: 120_000,
+  retirementAnnualLivingExpense: 120_000,
   monthlyNetIncome: 30_000,
   assets: { cash: 100_000, stocks: 400_000, bonds: 200_000, other: 0 },
   coveragePlans: {
@@ -22,7 +23,7 @@ describe('evaluatePlan', () => {
     expect(first.kind).toBe('evaluated');
     expect(second).toEqual(first);
     if (first.kind !== 'evaluated') return;
-    expect(first.modelVersion).toBe('1.0.0');
+    expect(first.modelVersion).toBe('1.0.1');
     expect(first.snapshot.inputs.currentAge).toBe(35);
     expect(first.result).toBeDefined();
     if (!first.result) return;
@@ -48,4 +49,13 @@ describe('evaluatePlan', () => {
     expect(invalid.kind).toBe('invalid');
     if (invalid.kind === 'invalid') expect(invalid.issues.some((issue) => issue.path === 'currentAge')).toBe(true);
   });
+});
+
+it('requires an explicit retirement budget and preserves a deliberate zero', () => {
+ const missing = evaluatePlan({...validPlan,retirementAnnualLivingExpense:undefined});
+ expect(missing.kind).toBe('needs-input');
+ if(missing.kind==='needs-input') expect(missing.issues).toContainEqual(expect.objectContaining({path:'retirementAnnualLivingExpense',code:'missing'}));
+ const zero = evaluatePlan({...validPlan,retirementAnnualLivingExpense:0});
+ expect(zero.kind).toBe('evaluated');
+ if(zero.kind==='evaluated') expect(zero.result?.assetPath[300].livingExpense).toBe(0);
 });

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createSession, sessionReducer } from '../../src/session';
 import { evaluatePlan, type PlanDraft, type EvaluatedPlan } from '../../src/planning';
-const complete: PlanDraft = { currentAge: 35, desiredRetirementAge: 36, planningEndAge: 37, annualLivingExpense: 12000, monthlyNetIncome: 30000, assets: {cash:100000,stocks:0,bonds:0,other:0} };
+const complete: PlanDraft = { currentAge: 35, desiredRetirementAge: 36, planningEndAge: 37, annualLivingExpense: 12000, retirementAnnualLivingExpense: 12000, monthlyNetIncome: 30000, assets: {cash:100000,stocks:0,bonds:0,other:0} };
 const evaluated = evaluatePlan(complete) as EvaluatedPlan;
 describe('live Session revision boundary', () => {
  it('keeps the last valid result when the current worker reply is incomplete',()=>{

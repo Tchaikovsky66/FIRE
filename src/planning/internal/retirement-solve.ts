@@ -2,18 +2,10 @@ import type {
   AdditionalContribution, AssetBalances, Attainment, CompletePlanInputs,
   CoverageKey, ReturnScenario, RetirementTarget, SolverIssue,
 } from '../contract';
-import { compileCase, simulate, solveTarget, type CompiledCase } from './engine';
+import { compileCase, simulate, solveTarget, withdrawalReference } from './engine';
 
 const total = (assets: AssetBalances): number => assets.cash + assets.stocks + assets.bonds + assets.other;
 const precision = 0.01;
-
-function referenceConstraint(ctx: CompiledCase): number {
-  const start = ctx.retirementMonth;
-  const count = Math.min(12, ctx.endMonth - start);
-  const annualGap = count > 0 ? ctx.flows.slice(start, start + count)
-    .reduce((sum, flow) => sum + flow.recurringSpending - flow.pensionIncome - flow.externalIncome, 0) * 12 / count : 0;
-  return Math.max(0, annualGap) / ctx.inputs.withdrawalRate + ctx.bufferAt(start);
-}
 
 /**
  * Scan the actual candidate months. Each candidate is simulated independently
@@ -35,7 +27,7 @@ export function solveRetirementTiming(inputs: CompletePlanInputs, coverage: Cove
     if (pre.numericError) { earlierUnresolved ??= numericIssue; continue; }
     if (pre.firstShortfall) { earliestShortfall ??= pre.firstShortfall; continue; }
     const assets = total(pre.finalAssets);
-    const required = referenceConstraint(ctx);
+    const required = withdrawalReference(ctx).total;
     if (!Number.isFinite(required)) { earlierUnresolved ??= numericIssue; continue; }
     if (required > inputs.solverMaxAmount) { earlierUnresolved ??= boundIssue; continue; }
     if (assets + 1e-7 < required) continue;

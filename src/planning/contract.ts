@@ -1,7 +1,7 @@
 import type { AssetBalances } from './internal/account-cash-flow';
 import type { LifeEvent, OneOffExpense } from './life-events';
 import type { ExternalIncome, InsurancePlanInput } from './insurance';
-export const MODEL_VERSION = '1.0.0';
+export const MODEL_VERSION = '1.0.1';
 export type { AssetBalances, LifeEvent, OneOffExpense, ExternalIncome, InsurancePlanInput };
 export type AssetInputs = Partial<AssetBalances>;
 export type ReturnScenario = 'conservative' | 'baseline' | 'optimistic';
@@ -27,9 +27,9 @@ export type PlanDraft = {
   selfOccupiedHomeValue?: number; rentalPropertyValue?: number; debtBalance?: number;
   manualTarget?: number; solverMaxAmount?: number;
 };
-export type CompletePlanInputs = Omit<PlanDraft, 'currentAge'|'desiredRetirementAge'|'planningEndAge'|'annualLivingExpense'|'monthlyNetIncome'|'assets'|'inflationRate'|'withdrawalRate'|'returnScenarios'|'targetAllocation'|'coveragePlans'> & {
+export type CompletePlanInputs = Omit<PlanDraft, 'currentAge'|'desiredRetirementAge'|'planningEndAge'|'annualLivingExpense'|'retirementAnnualLivingExpense'|'monthlyNetIncome'|'assets'|'inflationRate'|'withdrawalRate'|'returnScenarios'|'targetAllocation'|'coveragePlans'> & {
   currentAge: number; desiredRetirementAge: number; planningEndAge: number;
-  annualLivingExpense: number; monthlyNetIncome: number; assets: AssetBalances;
+  annualLivingExpense: number; retirementAnnualLivingExpense: number; monthlyNetIncome: number; assets: AssetBalances;
   inflationRate: number; withdrawalRate: number; cashBufferMonths: number;
   stockShock: number; bondShock: number; targetAllocation: AssetBalances;
   returnScenarios: ScenarioReturns; coveragePlans: Record<CoverageKey, InsurancePlanInput>;

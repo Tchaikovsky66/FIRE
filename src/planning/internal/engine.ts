@@ -18,8 +18,8 @@ const keys = ['cash','stocks','bonds','other'] as const;
 
 export function compileCase(inputs: CompletePlanInputs, coverage: CoverageKey, scenario: ReturnScenario, retirementMonth: number): CompiledCase {
   const endMonth = Math.round((inputs.planningEndAge-inputs.currentAge)*12);
-  const timeline:LifeEventTimelineInput = {startMonth:0,endMonth,currentPreRetirementAnnualBudget:inputs.annualLivingExpense,currentPostRetirementAnnualBudget:inputs.retirementAnnualLivingExpense??inputs.annualLivingExpense,events:inputs.lifeEvents??[],oneOffExpenses:inputs.oneOffExpenses??[]};
-  const insurance = evaluateInsurancePlans({startMonth:0,endMonth,retirementMonth,plans:inputs.coveragePlans,inflationRate:inputs.inflationRate});
+  const timeline:LifeEventTimelineInput = {startMonth:0,endMonth,currentPreRetirementAnnualBudget:inputs.annualLivingExpense,currentPostRetirementAnnualBudget:inputs.retirementAnnualLivingExpense,events:inputs.lifeEvents??[],oneOffExpenses:inputs.oneOffExpenses??[]};
+  const insurance = evaluateInsurancePlans({startMonth:0,endMonth,retirementMonth,employmentStartMonth:inputs.salaryStartMonth,employmentEndMonth:inputs.salaryEndMonth,plans:inputs.coveragePlans,inflationRate:inputs.inflationRate});
   const selected = insurance.kind==='evaluated'?insurance.plans[coverage]:undefined;
   const insuranceRows = selected?.kind==='evaluated'?selected.rows:[];
   const events = new Map<number,number>();
@@ -90,11 +90,18 @@ export function simulate(ctx:CompiledCase,options:{startMonth?:number;endMonth?:
   return {path,finalAssets:assets,minimumBalance,minimumRealBalance,minimumBalanceMonth,minimumRealBalanceMonth,firstShortfall,numericError};
 }
 
+export function withdrawalReference(ctx: CompiledCase) {
+  const start = ctx.retirementMonth;
+  const count = Math.min(12, ctx.endMonth - start);
+  const annualGap = count > 0 ? ctx.flows.slice(start, start + count)
+    .reduce((sum, flow) => sum + flow.recurringSpending - flow.pensionIncome - flow.externalIncome, 0) * 12 / count : 0;
+  const principal = Math.max(0, annualGap) / ctx.inputs.withdrawalRate;
+  return { principal, total: principal + ctx.bufferAt(start) };
+}
+
 export function solveTarget(ctx:CompiledCase):TargetOutcome{
-  const R=ctx.retirementMonth,C=ctx.bufferAt(R),count=Math.min(12,ctx.endMonth-R);
-  const annualGap=count>0?ctx.flows.slice(R,R+count).reduce((sum,f)=>sum+f.recurringSpending-f.pensionIncome-f.externalIncome,0)*12/count:0;
-  const withdrawalRatePrincipal=Math.max(0,annualGap)/ctx.inputs.withdrawalRate;
-  const withdrawalRateTotal=withdrawalRatePrincipal+C;
+  const R=ctx.retirementMonth,C=ctx.bufferAt(R);
+  const { principal: withdrawalRatePrincipal, total: withdrawalRateTotal } = withdrawalReference(ctx);
   const bound=ctx.inputs.solverMaxAmount,precision=0.01;
   if(!Number.isFinite(C)||!Number.isFinite(withdrawalRateTotal))return {kind:'unresolved',reason:'numeric-error',message:'当前假设导致非有限数值'};
   if(C>bound||withdrawalRateTotal>bound)return {kind:'unresolved',reason:'search-bound',message:'无法在当前搜索范围求解'};

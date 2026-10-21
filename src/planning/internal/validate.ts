@@ -21,10 +21,10 @@ export function validatePlan(draft:PlanDraft):Validation {
   const text=(path:string,v:unknown)=>{if(typeof v!=='string'||!v.trim()||v.length>500)issue(path,'请输入有效文本');};
   if(!isObject(draft))return {kind:'invalid',issues:[{code:'invalid',path:'plan',message:'方案结构无效'}]};
   num('currentAge',draft.currentAge,0,150,true);num('desiredRetirementAge',draft.desiredRetirementAge,0,150,true);num('planningEndAge',draft.planningEndAge,0,150,true);
-  num('annualLivingExpense',draft.annualLivingExpense,0,1e15,true);num('monthlyNetIncome',draft.monthlyNetIncome,0,1e15,true);
+  num('annualLivingExpense',draft.annualLivingExpense,0,1e15,true);num('retirementAnnualLivingExpense',draft.retirementAnnualLivingExpense,0,1e15,true);num('monthlyNetIncome',draft.monthlyNetIncome,0,1e15,true);
   if(draft.assets!==undefined&&!isObject(draft.assets))issue('assets','资产结构无效');
   for(const k of ASSETS)num(`assets.${k}`,isObject(draft.assets)?draft.assets[k]:undefined,0,1e15,true);
-  for(const k of ['retirementAnnualLivingExpense','annualRigidExpense','retirementAnnualRigidExpense','selfOccupiedHomeValue','rentalPropertyValue','debtBalance','manualTarget'] as const)num(k,draft[k]);
+  for(const k of ['annualRigidExpense','retirementAnnualRigidExpense','selfOccupiedHomeValue','rentalPropertyValue','debtBalance','manualTarget'] as const)num(k,draft[k]);
   if(finite(draft.annualRigidExpense)&&finite(draft.annualLivingExpense)&&draft.annualRigidExpense>draft.annualLivingExpense)issue('annualRigidExpense','刚性生活费不能超过完整生活费','out-of-range');
   if(finite(draft.retirementAnnualRigidExpense)&&finite(draft.retirementAnnualLivingExpense)&&draft.retirementAnnualRigidExpense>draft.retirementAnnualLivingExpense)issue('retirementAnnualRigidExpense','刚性生活费不能超过完整生活费','out-of-range');
   if(finite(draft.currentAge)&&finite(draft.desiredRetirementAge)&&draft.desiredRetirementAge<draft.currentAge)issue('desiredRetirementAge','希望退休年龄不能早于当前年龄','out-of-range');
@@ -69,6 +69,6 @@ export function validatePlan(draft:PlanDraft):Validation {
   const returns={} as ScenarioReturns;
   for(const s of SCENARIOS){returns[s]={...defaults[s],...draft.returnScenarios?.[s]};if(draft.annualReturn!==undefined)for(const k of ASSETS)returns[s][k]=draft.annualReturn;}
   const unknown=():InsurancePlanInput=>({contributionMonthly:0,contributionStartMonth:0,contributionEndMonth:0,contributionsAlreadyDeducted:false,medicalSelfPayMonthly:0,pension:{status:'unknown'},externalIncome:[]});
-  const inputs:CompletePlanInputs={...structuredClone(draft),currentAge:draft.currentAge!,desiredRetirementAge:draft.desiredRetirementAge!,planningEndAge:draft.planningEndAge!,annualLivingExpense:draft.annualLivingExpense!,monthlyNetIncome:draft.monthlyNetIncome!,assets,inflationRate:draft.inflationRate??.02,withdrawalRate:draft.withdrawalRate??.03,cashBufferMonths:draft.cashBufferMonths??24,stockShock:draft.stockShock??.65,bondShock:draft.bondShock??.95,targetAllocation:target,returnScenarios:returns,coveragePlans:{continue:structuredClone(draft.coveragePlans?.continue??unknown()),stop:structuredClone(draft.coveragePlans?.stop??unknown())},solverMaxAmount:draft.solverMaxAmount??1e14};
+  const inputs:CompletePlanInputs={...structuredClone(draft),currentAge:draft.currentAge!,desiredRetirementAge:draft.desiredRetirementAge!,planningEndAge:draft.planningEndAge!,annualLivingExpense:draft.annualLivingExpense!,retirementAnnualLivingExpense:draft.retirementAnnualLivingExpense!,monthlyNetIncome:draft.monthlyNetIncome!,assets,inflationRate:draft.inflationRate??.02,withdrawalRate:draft.withdrawalRate??.03,cashBufferMonths:draft.cashBufferMonths??24,stockShock:draft.stockShock??.65,bondShock:draft.bondShock??.95,targetAllocation:target,returnScenarios:returns,coveragePlans:{continue:structuredClone(draft.coveragePlans?.continue??unknown()),stop:structuredClone(draft.coveragePlans?.stop??unknown())},solverMaxAmount:draft.solverMaxAmount??1e14};
   return {kind:'complete',issues:[],inputs};
 }

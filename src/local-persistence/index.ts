@@ -1,9 +1,8 @@
 import { decodePlanFile, encodePlanFile, type NamedPlan, type Workspace } from '../plan-documents';
-import { evaluatePlan, type PlanEvaluation } from '../planning';
 
 export type StorageLike = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 export type PersistenceOutcome = { kind: 'saved' } | { kind: 'unsaved'; reason: 'unavailable'|'quota'|'invalid'; message: string };
-export type RestoreOutcome = { kind: 'empty' } | { kind: 'restored'; workspace: Workspace; evaluations: Record<string, PlanEvaluation> } | { kind: 'error'; message: string };
+export type RestoreOutcome = { kind: 'empty' } | { kind: 'restored'; workspace: Workspace } | { kind: 'error'; message: string };
 const KEY = 'fire-planner/workspace/v1';
 const failedMessage = '本地保存失败，当前方案仍保留在内存中，请导出备份。';
 
@@ -43,9 +42,7 @@ export function restoreWorkspace(storage: StorageLike): RestoreOutcome {
     }
     const workspace = { plans, activePlanId: record.activePlanId };
     if (!validWorkspace(workspace)) return { kind: 'error', message: '本地方案身份无效。' };
-    const evaluations: Record<string, PlanEvaluation> = Object.create(null);
-    for (const plan of plans) evaluations[plan.id] = evaluatePlan(plan.draft);
-    return { kind: 'restored', workspace, evaluations };
+    return { kind: 'restored', workspace };
   } catch { return { kind: 'error', message: '本地方案无法解析。' }; }
 }
 

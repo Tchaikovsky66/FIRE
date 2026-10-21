@@ -1,9 +1,13 @@
-import { useEffect, useId, useState } from 'react';
+import { useId } from 'react';
+import { useNumericField } from '../../session/numeric-editing';
 
 type Props = {
+  fieldId: string;
+  group?: string;
   label: string;
   value: number | undefined;
   onChange: (value: number | undefined) => void;
+  allowEmpty?: boolean;
   unit?: string;
   min?: number;
   max?: number;
@@ -11,20 +15,15 @@ type Props = {
   slider?: boolean;
   hint?: string;
 };
-const parse = (raw: string) => raw.trim() === '' ? undefined : /^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(raw) ? Number(raw) : NaN;
 
-export function NumberField({ label, value, onChange, unit = '', min = 0, max = 100, step = 1, slider = false, hint }: Props) {
+export function NumberField({ fieldId, group, label, value, onChange, allowEmpty = false, unit = '', min = 0, max = 100, step = 1, slider = false, hint }: Props) {
   const id = useId();
-  const [buffer, setBuffer] = useState(value === undefined ? '' : String(value));
-  useEffect(() => {
-    if (!Object.is(parse(buffer), value)) setBuffer(value === undefined ? '' : Number.isFinite(value) ? String(value) : buffer);
-  }, [value]); // Preserve an in-progress decimal while keeping slider/plan changes in sync.
-  const invalid = buffer !== '' && (!Number.isFinite(parse(buffer)) || Number(buffer) < min);
-  return <div className={`number-field${invalid ? ' has-error' : ''}`}>
+  const { raw, issue, change } = useNumericField({ id: fieldId, group, label, value, min, allowEmpty, onCommit: onChange });
+  return <div className={`number-field${issue ? ' has-error' : ''}`}>
     <label htmlFor={id}>{label}</label>
-    <div className="number-box"><input id={id} aria-label={label} inputMode="decimal" type="text" value={buffer} aria-invalid={invalid} autoComplete="off" onChange={event => { setBuffer(event.target.value); onChange(parse(event.target.value)); }} /><span>{unit}</span></div>
-    {slider && <input aria-label={`${label}快捷滑块`} type="range" min={min} max={Math.max(max, Number.isFinite(value) ? value! : max)} step={step} value={Number.isFinite(value) ? value : min} onChange={event => { const next = Number(event.target.value); setBuffer(String(next)); onChange(next); }} />}
+    <div className="number-box"><input id={id} aria-label={label} inputMode="decimal" type="text" value={raw} aria-invalid={!!issue} autoComplete="off" onChange={event => change(event.target.value)} /><span>{unit}</span></div>
+    {slider && <input aria-label={`${label}快捷滑块`} type="range" min={min} max={Math.max(max, Number.isFinite(value) ? value! : max)} step={step} value={Number.isFinite(value) ? value : min} onChange={event => change(event.target.value)} />}
     {hint && <small>{hint}</small>}
-    {invalid && <small className="error">请输入有效数字（至少 {min}）</small>}
+    {issue && <small className="error">{issue === 'missing' ? '请填写此项；没有请明确填 0' : `请输入有效数字（至少 ${min}）`}</small>}
   </div>;
 }

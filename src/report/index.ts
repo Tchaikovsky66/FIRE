@@ -32,7 +32,7 @@ export function renderMarkdownReport(evaluation: ReportSnapshot): string {
     `希望退休年龄：${formatAge(inputs.desiredRetirementAge)}`,
     `规划终点：${formatAge(inputs.planningEndAge)}`,
     `当前年度生活费：${formatMoney(inputs.annualLivingExpense)}（今天购买力）`,
-    `退休年度生活费：${formatMoney(inputs.retirementAnnualLivingExpense ?? inputs.annualLivingExpense)}（今天购买力）`,
+    `退休年度生活费：${formatMoney(inputs.retirementAnnualLivingExpense)}（今天购买力）`,
     `工作月税后收入：${formatMoney(inputs.monthlyNetIncome)}（今天购买力）`,
     '', '## 当前资产与固定事件',
     ...Object.entries(inputs.assets).map(([key, value]) => `${assetLabels[key as keyof typeof assetLabels]}：${formatMoney(value)}`),
@@ -53,13 +53,17 @@ export function renderMarkdownReport(evaluation: ReportSnapshot): string {
   ];
   for (const coverage of ['continue', 'stop'] as const) {
     const plan = inputs.coveragePlans[coverage];
+    const pensionText = plan.pension.status === 'unknown' ? '待完善' : plan.pension.status === 'none' ? '明确没有该项待遇' : (() => {
+      const missing = [plan.pension.startMonth === undefined ? '起领时间' : '', plan.pension.monthlyAmount === undefined ? '月净金额' : ''].filter(Boolean);
+      return missing.length ? `待完善（缺少${missing.join('、')}）` : `${formatMoney(plan.pension.monthlyAmount!)}/月（${plan.pension.amountBasis === 'start-month' ? '起领月名义金额' : '今天购买力'}），从 ${atMonth(plan.pension.startMonth!)} 开始，年增长 ${percent(plan.pension.annualGrowthRate ?? 0)}`;
+    })();
     lines.push('', `## ${coverage === 'continue' ? '继续购买' : '不再购买'}社保医保`,
       `未来缴费：${coverage === 'stop' ? '从现在起不再计入' : `${formatMoney(plan.contributionMonthly)}/月，${atMonth(plan.contributionStartMonth)} 至 ${atMonth(plan.contributionEndMonth)}（结束月不含）`}`,
       `在职个人缴费：${plan.contributionsAlreadyDeducted ? '已从到手工资扣除，不重复扣减；离职后自行缴费仍按设定处理' : '按单独支出处理'}`,
       `医疗自付：每月 ${formatMoney(plan.medicalSelfPayMonthly)}`,
-      `养老金：${plan.pension.status === 'unknown' ? '待完善' : plan.pension.status === 'none' ? '明确没有该项待遇' : `${formatMoney(plan.pension.monthlyAmount)}/月（${plan.pension.amountBasis === 'start-month' ? '起领月名义金额' : '今天购买力'}），从 ${atMonth(plan.pension.startMonth!)} 开始，年增长 ${percent(plan.pension.annualGrowthRate ?? 0)}`}`,
+      `养老金：${pensionText}`,
       '已有养老金权益按输入保留；资格、医保衔接和待遇有效性需用户核对。');
-    for (const income of [...inputs.externalIncome ?? [], ...plan.externalIncome]) lines.push(`组合外收入 ${escape(income.label ?? income.id)}：${atMonth(income.startMonth)} 至 ${atMonth(income.endMonth)}（结束月不含），每月 ${formatMoney(income.monthlyAmount)}，${income.growth === 'nominal' ? '固定名义口径' : '按购买力增长口径'}，年增长 ${percent(income.annualGrowthRate ?? 0)}`);
+    for (const income of [...inputs.externalIncome ?? [], ...plan.externalIncome]) lines.push(`组合外收入 ${escape(income.label ?? income.id)}：${atMonth(income.startMonth)} 至 ${atMonth(income.endMonth)}（结束月不含），每月 ${formatMoney(income.monthlyAmount)}，${income.growth === 'real' ? '按购买力增长口径' : '固定名义口径'}，年增长 ${percent(income.annualGrowthRate ?? 0)}`);
     for (const item of evaluation.cases.filter(item => item.key.coverage === coverage)) {
       lines.push('', `### ${scenarioLabels[item.key.returns]}收益情景`);
       const outcome = item.outcome;
