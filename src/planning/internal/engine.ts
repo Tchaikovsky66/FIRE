@@ -32,13 +32,13 @@ export function compileCase(inputs: CompletePlanInputs, coverage: CoverageKey, s
     const workIncome=month<retirementMonth&&month>=(inputs.salaryStartMonth??0)&&month<(inputs.salaryEndMonth??endMonth)?inputs.monthlyNetIncome*inflationFactor*Math.pow(1+(inputs.salaryRealGrowthRate??0),month/12):0;
     let externalIncome=row?.externalIncome??0;
     for(const income of inputs.externalIncome??[]){
-      if(month>=income.startMonth&&month<income.endMonth)externalIncome+=income.monthlyAmount*(income.growth==='nominal'?1:inflationFactor)*Math.pow(1+(income.annualGrowthRate??0),(month-income.startMonth)/12);
+      if(month>=income.startMonth&&month<income.endMonth)externalIncome+=income.monthlyAmount*(income.growth==='real'?inflationFactor:1)*Math.pow(1+(income.annualGrowthRate??0),(month-income.startMonth)/12);
     }
     const pensionIncome=row?.pensionIncome??0;
     const livingExpense=budget.annualLivingBudget/12*inflationFactor;
     const contribution=row?.contribution??0;
     const medicalSelfPay=row?.medicalSelfPay??0;
-    const debtPayment=(inputs.debtPayments??[]).reduce((sum,debt)=>month>=debt.startMonth&&month<debt.endMonth?sum+debt.monthlyAmount*(debt.growth==='nominal'?1:inflationFactor):sum,0);
+    const debtPayment=(inputs.debtPayments??[]).reduce((sum,debt)=>month>=debt.startMonth&&month<debt.endMonth?sum+debt.monthlyAmount*(debt.growth==='real'?inflationFactor:1):sum,0);
     const oneOffExpense=(events.get(month)??0)*inflationFactor;
     const recurringSpending=livingExpense+contribution+medicalSelfPay+debtPayment;
     flows.push({month,inflationFactor,workIncome,pensionIncome,externalIncome,livingExpense,contribution,medicalSelfPay,debtPayment,oneOffExpense,income:workIncome+pensionIncome+externalIncome,recurringSpending,spending:recurringSpending+oneOffExpense});
