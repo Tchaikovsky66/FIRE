@@ -59,7 +59,7 @@ export function renderMarkdownReport(evaluation: ReportSnapshot): string {
       `医疗自付：每月 ${formatMoney(plan.medicalSelfPayMonthly)}`,
       `养老金：${plan.pension.status === 'unknown' ? '待完善' : plan.pension.status === 'none' ? '明确没有该项待遇' : `${formatMoney(plan.pension.monthlyAmount)}/月（${plan.pension.amountBasis === 'start-month' ? '起领月名义金额' : '今天购买力'}），从 ${atMonth(plan.pension.startMonth!)} 开始，年增长 ${percent(plan.pension.annualGrowthRate ?? 0)}`}`,
       '已有养老金权益按输入保留；资格、医保衔接和待遇有效性需用户核对。');
-    for (const income of [...inputs.externalIncome ?? [], ...plan.externalIncome]) lines.push(`组合外收入 ${escape(income.id)}：${atMonth(income.startMonth)} 至 ${atMonth(income.endMonth)}（结束月不含），每月 ${formatMoney(income.monthlyAmount)}，${income.growth === 'nominal' ? '固定名义口径' : '按购买力增长口径'}，年增长 ${percent(income.annualGrowthRate ?? 0)}`);
+    for (const income of [...inputs.externalIncome ?? [], ...plan.externalIncome]) lines.push(`组合外收入 ${escape(income.label ?? income.id)}：${atMonth(income.startMonth)} 至 ${atMonth(income.endMonth)}（结束月不含），每月 ${formatMoney(income.monthlyAmount)}，${income.growth === 'nominal' ? '固定名义口径' : '按购买力增长口径'}，年增长 ${percent(income.annualGrowthRate ?? 0)}`);
     for (const item of evaluation.cases.filter(item => item.key.coverage === coverage)) {
       lines.push('', `### ${scenarioLabels[item.key.returns]}收益情景`);
       const outcome = item.outcome;

@@ -1,0 +1,290 @@
+import { test, expect, type Page } from '@playwright/test';
+import { readFile, mkdir } from 'node:fs/promises';
+
+const stepNames = ['生活与时间', '现在的基础', '未来变化', '保障与收入', '投资假设', '退休路径'];
+async function goStep(page: Page, name: string) {
+  await page.getByRole('navigation', { name: '六步规划' }).getByRole('button', { name: new RegExp(name) }).click();
+  await expect(page.locator('.step-title h2')).toHaveText(name);
+}
+async function currentResult(page: Page) {
+  await expect(page.locator('.results')).toHaveAttribute('aria-busy', 'false');
+  await expect(page.locator('.results > .result-top .save-indicator')).toHaveText('当前输入结果');
+}
+async function example(page: Page) {
+  await page.goto('/');
+  await expect(page).toHaveTitle('FIRE 规划');
+  await page.getByRole('button', { name: /先用「小林的示例」/ }).click();
+  await currentResult(page);
+  await expect(page.getByTestId('target-total')).toContainText('万元');
+}
+async function assertNoOverflow(page: Page) {
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+}
+
+test('funding chart labels remain readable at the rendered viewport width', async ({ page }, testInfo) => {
+  await example(page);
+  const chart = page.getByTestId('funding-chart');
+  await chart.scrollIntoViewIfNeeded();
+  await expect.poll(() => chart.locator('text').first().evaluate(element => {
+    const text = element as SVGTextElement;
+    return Number.parseFloat(getComputedStyle(text).fontSize) * (text.getScreenCTM()?.a ?? 0);
+  })).toBeGreaterThanOrEqual(10.5);
+  await assertNoOverflow(page);
+  await page.screenshot({ path: `/tmp/fire-qa/${testInfo.project.name}-chart.png`, fullPage: false });
+});
+
+test('external income names keep focus and duplicate labels preserve independent rows', async ({ page }) => {
+  await example(page);
+  await goStep(page, '保障与收入');
+  await page.getByRole('button', { name: '添加组合外收入', exact: true }).click();
+  const firstName = page.getByLabel('收入1名称', { exact: true });
+  await firstName.fill('');
+  await firstName.pressSequentially('side income', { delay: 20 });
+  await expect(firstName).toBeFocused();
+  await expect(firstName).toHaveValue('side income');
+  await page.getByRole('button', { name: '添加组合外收入', exact: true }).click();
+  await page.getByLabel('收入2名称', { exact: true }).fill('side income');
+  await page.getByLabel('月净收入', { exact: true }).nth(0).fill('1000');
+  await page.getByLabel('月净收入', { exact: true }).nth(1).fill('2000');
+  await expect(page.getByLabel('月净收入', { exact: true }).nth(0)).toHaveValue('1000');
+  await currentResult(page);
+  const downloadEvent = page.waitForEvent('download');
+  await page.getByRole('button', { name: '导出 JSON', exact: true }).click();
+  const file = JSON.parse(await readFile((await (await downloadEvent).path())!, 'utf8'));
+  const incomes = file.plan.draft.externalIncome;
+  expect(incomes.map((income: { label: string }) => income.label)).toEqual(['side income', 'side income']);
+  expect(new Set(incomes.map((income: { id: string }) => income.id)).size).toBe(2);
+  await page.getByRole('button', { name: '删除收入', exact: true }).nth(0).click();
+  await expect(page.getByLabel('月净收入', { exact: true })).toHaveValue('2000');
+  await currentResult(page);
+  await goStep(page, '退休路径');
+  const reportEvent = page.waitForEvent('download');
+  await page.getByRole('button', { name: '导出 Markdown 报告', exact: true }).click();
+  const report = await readFile((await (await reportEvent).path())!, 'utf8');
+  expect(report).toContain('组合外收入 side income');
+  expect(report).not.toContain(incomes[1].id);
+});
+
+test('blank plan becomes a complete six-step workspace through real input', async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(String(error)));
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  await page.goto('/');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('你的生活，由你来安排。');
+  await expect(page.getByLabel('当前年龄', { exact: true })).toHaveValue('');
+  await expect(page.getByLabel('希望退休年龄', { exact: true })).toHaveValue('');
+  await expect(page.getByText('先留一点空间给未来', { exact: true })).toBeVisible();
+  await page.getByLabel('规划基准月', { exact: true }).fill('2026-10');
+  for (const [label, value] of [['当前年龄', '30'], ['希望退休年龄', '40'], ['规划终点年龄', '45'], ['退休前年生活费', '12000'], ['退休后年生活费', '12000']]) await page.getByLabel(label, { exact: true }).fill(value);
+  await page.getByRole('button', { name: '下一步 →', exact: true }).click();
+  await expect(page.locator('.step-title h2')).toHaveText('现在的基础');
+  for (const [label, value] of [['月税后工作收入', '10000'], ['现金', '500000'], ['股票 / 基金', '0'], ['债券 / 存款', '0'], ['其他可投资资产', '0']]) await page.getByLabel(label, { exact: true }).fill(value);
+  await goStep(page, '保障与收入');
+  await page.getByLabel('continue养老金待遇', { exact: true }).selectOption('none');
+  await page.getByLabel('stop养老金待遇', { exact: true }).selectOption('none');
+  await currentResult(page);
+  await expect(page.getByTestId('funding-chart')).toBeVisible();
+  await expect(page.locator('.results table').first().locator('tbody tr')).toHaveCount(6);
+  for (const step of stepNames) { await goStep(page, step); await assertNoOverflow(page); }
+  await page.getByRole('button', { name: '上一步', exact: true }).click();
+  await expect(page.locator('.step-title h2')).toHaveText('投资假设');
+  await goStep(page, '生活与时间');
+  await expect(page.getByLabel('当前年龄', { exact: true })).toHaveValue('30');
+  const latency = await page.getByTestId('evaluation-latency').innerText();
+  console.log(`${testInfo.project.name} minimal input latency: ${latency}`);
+  expect(errors).toEqual([]);
+  await mkdir('/tmp/fire-qa', { recursive: true });
+  await page.screenshot({ path: `/tmp/fire-qa/${testInfo.project.name}-workspace.png`, fullPage: false });
+});
+
+test('precise values, shortcut slider, incomplete edits and worker revisions stay coherent', async ({ page }, testInfo) => {
+  await example(page);
+  const originalPath = await page.getByTestId('funding-chart').locator('.balance-line').getAttribute('d');
+  const originalScale = await page.getByTestId('funding-chart').locator('text').nth(2).textContent();
+  await page.getByLabel('退休后年生活费', { exact: true }).fill('130000');
+  await currentResult(page);
+  await expect(page.getByTestId('funding-chart').locator('.balance-line')).not.toHaveAttribute('d', originalPath!);
+  await expect(page.getByTestId('funding-chart').locator('text').nth(2)).not.toHaveText(originalScale!);
+  const previousTarget = await page.getByTestId('target-total').innerText();
+  await page.getByLabel('当前年龄', { exact: true }).fill('');
+  await expect(page.locator('.inputs .validation')).toContainText('资料待完善');
+  await expect(page.locator('.results .save-indicator')).toHaveText('最后有效结果');
+  await expect(page.getByTestId('target-total')).toHaveText(previousTarget);
+  await page.getByLabel('当前年龄', { exact: true }).fill('-1');
+  await expect(page.locator('.inputs .validation')).toContainText('请检查输入');
+  await page.getByLabel('当前年龄', { exact: true }).fill('36');
+  await page.getByLabel('当前年龄', { exact: true }).fill('37');
+  await page.getByLabel('当前年龄', { exact: true }).fill('35');
+  await currentResult(page);
+  await expect(page.getByLabel('当前年龄', { exact: true })).toHaveValue('35');
+  await goStep(page, '现在的基础');
+  const cashBar = page.getByRole('img', { name: '现金、股票、债券及其他资产叠层柱', exact: true }).locator('rect').first();
+  const originalCashWidth = await cashBar.getAttribute('width');
+  await page.getByLabel('现金', { exact: true }).fill('123456');
+  await currentResult(page);
+  await expect(cashBar).not.toHaveAttribute('width', originalCashWidth!);
+  await expect(cashBar.locator('title')).toContainText('12.3 万元');
+  const income = page.getByLabel('月税后工作收入', { exact: true });
+  await income.fill('200000');
+  await currentResult(page);
+  const slider = page.getByRole('slider', { name: '月税后工作收入快捷滑块' });
+  await expect(slider).toHaveValue('200000');
+  await expect(income).toHaveValue('200000');
+  await slider.focus(); await slider.press('ArrowLeft');
+  await expect(income).toHaveValue('199000');
+  await income.fill('0'); await currentResult(page);
+  await expect(income).toHaveValue('0');
+  await expect(page.locator('.inputs .validation')).toHaveCount(0);
+  await income.fill('25000'); await currentResult(page);
+  await goStep(page, '退休路径');
+  const reportDownload = page.waitForEvent('download');
+  await page.getByRole('button', { name: '导出 Markdown 报告', exact: true }).click();
+  const report = await readFile((await (await reportDownload).path())!, 'utf8');
+  expect(report).toContain('当前年龄：35');
+  expect(report).not.toContain('当前年龄：37');
+  console.log(`${testInfo.project.name} example input latency: ${await page.getByTestId('evaluation-latency').innerText()}`);
+  await assertNoOverflow(page);
+});
+
+test('life events keep precise month, age, date and timeline editing in sync', async ({ page }) => {
+  await example(page);
+  await page.getByLabel('规划基准月', { exact: true }).fill('2026-10');
+  await currentResult(page);
+  const originalTarget = await page.getByTestId('target-total').innerText();
+  await goStep(page, '未来变化');
+  await page.getByRole('button', { name: '添加人生节点', exact: true }).click();
+  await page.getByLabel('节点1名称', { exact: true }).fill('结婚');
+  await page.getByLabel('节点1退休前年完整预算', { exact: true }).fill('140000');
+  await page.getByLabel('节点1退休后年完整预算', { exact: true }).fill('160000');
+  await currentResult(page);
+  await expect(page.getByTestId('target-total')).not.toHaveText(originalTarget);
+  await page.getByLabel('节点1生效月', { exact: true }).fill('24');
+  await expect(page.getByLabel('节点1年龄', { exact: true })).toHaveValue('37');
+  await expect(page.getByLabel('节点1年月', { exact: true })).toHaveValue('2028-10');
+  await page.getByLabel('节点1年龄', { exact: true }).fill('38');
+  await expect(page.getByLabel('节点1生效月', { exact: true })).toHaveValue('36');
+  await page.getByLabel('节点1年月', { exact: true }).fill('2028-10');
+  await expect(page.getByLabel('节点1生效月', { exact: true })).toHaveValue('24');
+  const timeline = page.getByRole('slider', { name: '移动结婚节点', exact: true });
+  await timeline.focus(); await timeline.press('ArrowRight');
+  await expect(page.getByLabel('节点1生效月', { exact: true })).toHaveValue('25');
+  await expect(page.getByLabel('节点1年月', { exact: true })).toHaveValue('2028-11');
+  await goStep(page, '生活与时间');
+  await page.getByLabel('希望退休年龄', { exact: true }).fill('51');
+  await currentResult(page);
+  await goStep(page, '未来变化');
+  await expect(page.getByLabel('节点1生效月', { exact: true })).toHaveValue('25');
+  await page.getByRole('button', { name: '添加人生节点', exact: true }).click();
+  await page.getByLabel('节点2生效月', { exact: true }).fill('25');
+  await page.getByLabel('节点2退休前年完整预算', { exact: true }).fill('150000');
+  await expect(page.locator('.inputs .validation')).toContainText('同月有多个完整预算');
+  await expect(page.locator('.results .save-indicator')).toHaveText('最后有效结果');
+  await page.getByRole('button', { name: '删除节点', exact: true }).nth(1).click();
+  await currentResult(page);
+  const beforeExpense = await page.getByTestId('funding-chart').locator('.balance-line').getAttribute('d');
+  await page.getByRole('button', { name: '添加一次性支出', exact: true }).click();
+  await page.getByLabel('大额支出1名称', { exact: true }).fill('婚礼');
+  await page.getByLabel('大额支出1发生月', { exact: true }).fill('25');
+  await page.getByLabel('大额支出1金额', { exact: true }).fill('50000');
+  await currentResult(page);
+  await expect(page.getByTestId('funding-chart').locator('.balance-line')).not.toHaveAttribute('d', beforeExpense!);
+  await expect(page.locator('.event-tags')).toContainText('婚礼');
+  await assertNoOverflow(page);
+});
+
+test('insurance unknowns stay case-local and assumptions update graphs with reduced motion', async ({ page }) => {
+  await example(page);
+  await goStep(page, '保障与收入');
+  await page.getByLabel('continue养老金待遇', { exact: true }).selectOption('unknown');
+  await currentResult(page);
+  await expect(page.locator('.results .validation')).toContainText('继续购买 · 待完善');
+  await expect(page.getByTestId('target-total')).toHaveCount(0);
+  await page.locator('.result-controls').getByRole('button', { name: '不再购买', exact: true }).click();
+  await expect(page.getByTestId('target-total')).toBeVisible();
+  const rows = page.locator('.results table').first().locator('tbody tr');
+  await expect(rows.filter({ hasText: '待遇待完善' })).toHaveCount(3);
+  await page.getByLabel('continue养老金待遇', { exact: true }).selectOption('known');
+  await currentResult(page);
+  await page.locator('.result-controls').getByRole('button', { name: '继续购买', exact: true }).click();
+  const beforeIncome = await page.getByTestId('funding-chart').locator('.balance-line').getAttribute('d');
+  await page.getByRole('button', { name: '添加组合外收入', exact: true }).click();
+  await page.getByLabel('月净收入', { exact: true }).fill('1000');
+  await currentResult(page);
+  await expect(page.getByTestId('funding-chart').locator('.balance-line')).not.toHaveAttribute('d', beforeIncome!);
+  await goStep(page, '投资假设');
+  const beforeInflation = await page.getByTestId('funding-chart').locator('.balance-line').getAttribute('d');
+  await page.getByLabel('通胀年率', { exact: true }).fill('3');
+  await currentResult(page);
+  await expect(page.getByTestId('funding-chart').locator('.balance-line')).not.toHaveAttribute('d', beforeInflation!);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  expect(await page.getByLabel('通胀年率', { exact: true }).evaluate(element => getComputedStyle(element).transitionDuration)).toBe('0s');
+  await page.getByLabel('通胀年率', { exact: true }).fill('2');
+  await currentResult(page);
+  await assertNoOverflow(page);
+});
+
+test('local plan copies, comparison, JSON exchange, invalid imports and reports preserve plans', async ({ page }, testInfo) => {
+  await example(page);
+  const originalId = await page.getByLabel('当前方案', { exact: true }).inputValue();
+  const originalTarget = await page.getByTestId('target-total').innerText();
+  await page.getByRole('button', { name: '复制', exact: true }).click();
+  await currentResult(page);
+  const copiedId = await page.getByLabel('当前方案', { exact: true }).inputValue();
+  expect(copiedId).not.toBe(originalId);
+  await page.getByLabel('退休后年生活费', { exact: true }).fill('150000');
+  await currentResult(page);
+  await expect(page.getByTestId('target-total')).not.toHaveText(originalTarget);
+  await goStep(page, '退休路径');
+  await page.getByLabel('方案名称', { exact: true }).fill('备选方案');
+  await page.getByLabel('比较对象', { exact: true }).selectOption(originalId);
+  await expect(page.locator('.comparison-summary')).toContainText(originalTarget);
+  const reportEvent = page.waitForEvent('download');
+  await page.getByRole('button', { name: '导出 Markdown 报告', exact: true }).click();
+  const report = await readFile((await (await reportEvent).path())!, 'utf8');
+  expect(report).toContain('压力测试'); expect(report).toContain('继续购买'); expect(report).toContain('不再购买');
+  const jsonEvent = page.waitForEvent('download');
+  await page.getByRole('button', { name: '导出 JSON', exact: true }).click();
+  const text = await readFile((await (await jsonEvent).path())!, 'utf8');
+  const file = JSON.parse(text);
+  expect(file.version).toBe(1); expect(file.plan.id).toBe(copiedId); expect(file.plan.draft.retirementAnnualLivingExpense).toBe(150000); expect(file.plan).not.toHaveProperty('result');
+  await page.getByLabel('导入 JSON 文件', { exact: true }).setInputFiles({ name: 'plan.json', mimeType: 'application/json', buffer: Buffer.from(text) });
+  await expect(page.locator('.notice')).toContainText('已导入为新副本');
+  await expect(page.getByLabel('当前方案', { exact: true }).locator('option')).toHaveCount(4);
+  const importedId = await page.getByLabel('当前方案', { exact: true }).inputValue();
+  expect(importedId).not.toBe(copiedId);
+  await currentResult(page);
+  await page.getByLabel('导入 JSON 文件', { exact: true }).setInputFiles({ name: 'bad.json', mimeType: 'application/json', buffer: Buffer.from('{bad') });
+  await expect(page.locator('.notice')).toContainText('导入失败');
+  await expect(page.getByLabel('当前方案', { exact: true }).locator('option')).toHaveCount(4);
+  await page.getByLabel('导入 JSON 文件', { exact: true }).setInputFiles({ name: 'future.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ ...file, version: 999 })) });
+  await expect(page.locator('.notice')).toContainText('不支持');
+  await expect(page.getByLabel('当前方案', { exact: true })).toHaveValue(importedId);
+  await expect(page.locator('.workspace-toolbar .save-indicator')).toHaveText('已保存在此浏览器');
+  await page.reload();
+  await currentResult(page);
+  await expect(page.getByLabel('当前方案', { exact: true })).toHaveValue(importedId);
+  await expect(page.getByLabel('当前方案', { exact: true }).locator('option')).toHaveCount(4);
+  await page.getByLabel('当前方案', { exact: true }).selectOption(originalId);
+  await currentResult(page);
+  await expect(page.getByTestId('target-total')).toHaveText(originalTarget);
+  await expect(page.getByLabel('退休后年生活费', { exact: true })).toHaveValue('120000');
+  await assertNoOverflow(page);
+  await page.getByTestId('funding-chart').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `/tmp/fire-qa/${testInfo.project.name}-results.png`, fullPage: false });
+});
+
+test('storage quota failures leave memory intact with a working export', async ({ page }) => {
+  await page.addInitScript(() => {
+    Storage.prototype.setItem = () => { throw new DOMException('quota exceeded', 'QuotaExceededError'); };
+  });
+  await example(page);
+  await expect(page.locator('.workspace-toolbar .save-indicator')).toContainText('本地保存失败');
+  await page.getByLabel('退休后年生活费', { exact: true }).fill('132000');
+  await currentResult(page);
+  const downloadEvent = page.waitForEvent('download');
+  await page.getByRole('button', { name: '导出 JSON', exact: true }).click();
+  const file = JSON.parse(await readFile((await (await downloadEvent).path())!, 'utf8'));
+  expect(file.plan.draft.retirementAnnualLivingExpense).toBe(132000);
+  await expect(page.getByLabel('退休后年生活费', { exact: true })).toHaveValue('132000');
+  await expect(page.getByTestId('target-total')).toBeVisible();
+});
