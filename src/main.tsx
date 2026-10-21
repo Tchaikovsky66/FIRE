@@ -1,30 +1,92 @@
-import { StrictMode, useMemo, useState } from 'react';
+import { StrictMode, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { evaluatePlan, type PlanDraft } from './planning';
+import { evaluatePlan, type PlanDraft, type PlanEvaluation, type EvaluatedPlan } from './planning';
+import { encodePlanFile, decodePlanFile, copyPlan, createWorkspace, type Workspace, type NamedPlan } from './plan-documents';
+import { restoreWorkspace, saveWorkspace } from './local-persistence';
+import { renderMarkdownReport } from './report';
+import { Results, EvaluationIssues, attainmentText, contributionText } from './workbench/Results';
+import { steps, LifeFields, AssetFields, EventFields, InsuranceFields, AssumptionFields, coverageDefault } from './workbench/steps/PlanFields';
+import { formatMoney, purchasingPower } from './display';
 import './styles.css';
 
-const initial: PlanDraft = { currentAge: 35, desiredRetirementAge: 60, planningEndAge: 85, annualLivingExpense: 120000, monthlyNetIncome: 30000, assets: { cash: 100000, stocks: 400000, bonds: 200000, other: 0 } };
-
+const baselineMonth = () => { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`; };
+const blankPlan = (): NamedPlan => ({ id: crypto.randomUUID(), name: '我的退休方案', draft: { baseMonth: baselineMonth(), scope: 'individual', planningEndAge: 85, inflationRate: .02, withdrawalRate: .03, cashBufferMonths: 24 } });
+function examplePlan(): NamedPlan {
+  const base = coverageDefault();
+  return { id: crypto.randomUUID(), name: '小林的选择 · 示例', isExample: true, draft: { baseMonth: baselineMonth(), scope: 'individual', currentAge: 35, desiredRetirementAge: 50, planningEndAge: 85, annualLivingExpense: 96000, retirementAnnualLivingExpense: 120000, annualRigidExpense: 60000, retirementAnnualRigidExpense: 72000, monthlyNetIncome: 25000, assets: { cash: 200000, stocks: 500000, bonds: 300000, other: 0 }, targetAllocation: { cash: .1, stocks: .5, bonds: .4, other: 0 }, coveragePlans: { continue: { ...base, contributionMonthly: 1500, contributionEndMonth: 300, contributionsAlreadyDeducted: false, medicalSelfPayMonthly: 500, pension: { status: 'known', startMonth: 300, monthlyAmount: 4000, annualGrowthRate: .02, existingRights: true } }, stop: { ...base, medicalSelfPayMonthly: 1000, pension: { status: 'known', startMonth: 300, monthlyAmount: 1200, annualGrowthRate: .02, existingRights: true } } }, inflationRate: .02, withdrawalRate: .03, cashBufferMonths: 24, otherReturnConfirmedZero: true } };
+}
+function download(text: string, name: string, type: string) {
+  const url = URL.createObjectURL(new Blob([text], { type })); const anchor = document.createElement('a'); anchor.href = url; anchor.download = name; anchor.click(); setTimeout(() => URL.revokeObjectURL(url), 500);
+}
+function loadInitial(): { workspace: Workspace; message: string } {
+  try { const restored = restoreWorkspace(window.localStorage); if (restored.kind === 'restored') return { workspace: restored.workspace, message: '已从本地恢复，按当前模型重新计算' }; return { workspace: createWorkspace(blankPlan()), message: restored.kind === 'error' ? restored.message : '' }; } catch { return { workspace: createWorkspace(blankPlan()), message: '本地存储不可用，当前方案仍可编辑并导出' }; }
+}
 function App() {
-  const [draft, setDraft] = useState<PlanDraft>(initial);
-  const evaluation = useMemo(() => evaluatePlan(draft), [draft]);
-  const update = (field: keyof PlanDraft, value: string) => setDraft((current) => ({ ...current, [field]: value === '' ? undefined : Number(value) }));
+  const [initial] = useState(loadInitial);
+  const [workspace, setWorkspace] = useState(initial.workspace);
+  const [step, setStep] = useState(0);
+  const [message, setMessage] = useState(initial.message);
+  const [saved, setSaved] = useState('正在保存');
+  const [evaluation, setEvaluation] = useState<PlanEvaluation>();
+  const [lastValid, setLastValid] = useState<EvaluatedPlan>();
+  const [pending, setPending] = useState(true);
+  const [latency, setLatency] = useState<number>();
+  const [compareId, setCompareId] = useState('');
+  const [comparison, setComparison] = useState<EvaluatedPlan>();
+  const fileInput = useRef<HTMLInputElement>(null);
+  const revision = useRef(0);
+  const inputAt = useRef(performance.now());
+  const active = workspace.plans.find(plan => plan.id === workspace.activePlanId) ?? workspace.plans[0];
+  const cache = useRef(new Map<string, EvaluatedPlan>());
+  useEffect(() => {
+    const currentRevision = ++revision.current;
+    setPending(true); setEvaluation(undefined); setLastValid(cache.current.get(active.id));
+    const timer = setTimeout(() => {
+      const next = evaluatePlan(active.draft);
+      if (currentRevision !== revision.current) return;
+      setEvaluation(next); setPending(false); setLatency(performance.now() - inputAt.current);
+      if (next.kind === 'evaluated') { cache.current.set(active.id, next); setLastValid(next); }
+    }, 80);
+    return () => clearTimeout(timer);
+  }, [active.id, active.draft]);
+  useEffect(() => {
+    const timer = setTimeout(() => { try { const result = saveWorkspace(window.localStorage, workspace); setSaved(result.kind === 'saved' ? '已保存在此浏览器' : result.message); } catch { setSaved('未保存：本地存储不可用，请导出备份'); } }, 180);
+    return () => clearTimeout(timer);
+  }, [workspace]);
+  useEffect(() => {
+    const plan = workspace.plans.find(row => row.id === compareId); if (!plan) { setComparison(undefined); return; }
+    const timer = setTimeout(() => { const next = evaluatePlan(plan.draft); setComparison(next.kind === 'evaluated' ? next : undefined); }, 100);
+    return () => clearTimeout(timer);
+  }, [compareId, workspace.plans]);
+  const patch = (value: Partial<PlanDraft>) => { inputAt.current = performance.now(); setPending(true); setWorkspace(current => ({ ...current, plans: current.plans.map(plan => plan.id === active.id ? { ...plan, draft: { ...plan.draft, ...value } } : plan) })); };
+  const append = (plan: NamedPlan) => { inputAt.current = performance.now(); setWorkspace(current => ({ plans: [...current.plans, plan], activePlanId: plan.id })); setStep(0); };
+  const exportJson = () => { download(encodePlanFile(active), `FIRE-${active.name}.json`, 'application/json'); setMessage('JSON 备份已生成，包含输入和假设，不包含旧计算缓存。'); };
+  const exportReport = () => { if (pending || !evaluation || evaluation.kind !== 'evaluated') return; download(renderMarkdownReport(evaluation), `FIRE-${active.name}.md`, 'text/markdown;charset=utf-8'); setMessage('Markdown 报告已从当前同一评估快照生成。'); };
+  const evaluated = evaluation?.kind === 'evaluated' ? evaluation : lastValid;
+  const stale = pending || evaluation?.kind !== 'evaluated';
+  const props = { draft: active.draft, patch };
+  const comparisonResult = comparison?.cases.find(row => row.key.coverage === 'continue' && row.key.returns === 'baseline')?.outcome;
+  const summaryResult = evaluated?.cases.find(row => row.key.coverage === 'continue' && row.key.returns === 'baseline')?.outcome;
   return <main className="app">
-    <header><p className="eyebrow">本地优先 · FIRE 规划</p><h1>把退休计划变成一条看得懂的路径</h1><p className="lead">输入当前情况，查看目标资金与资产路径。结果只基于你填写的假设。</p></header>
-    <section className="workspace">
-      <form className="panel inputs" onSubmit={(event) => event.preventDefault()}><h2>建立你的基础方案</h2>
-        <label>当前年龄<input aria-label="当前年龄" type="number" min="0" value={draft.currentAge ?? ''} onChange={(e) => update('currentAge', e.target.value)} /></label>
-        <label>希望退休年龄<input aria-label="希望退休年龄" type="number" min="0" value={draft.desiredRetirementAge ?? ''} onChange={(e) => update('desiredRetirementAge', e.target.value)} /></label>
-        <label>规划终点年龄<input aria-label="规划终点年龄" type="number" min="0" value={draft.planningEndAge ?? ''} onChange={(e) => update('planningEndAge', e.target.value)} /></label>
-        <label>年度生活费（元）<input aria-label="年度生活费" type="number" min="0" value={draft.annualLivingExpense ?? ''} onChange={(e) => update('annualLivingExpense', e.target.value)} /></label>
-        <label>月税后收入（元）<input aria-label="月税后收入" type="number" min="0" value={draft.monthlyNetIncome ?? ''} onChange={(e) => update('monthlyNetIncome', e.target.value)} /></label>
-        <label>可投资资产（元）<input aria-label="可投资资产" type="number" min="0" value={draft.assets ? Object.values(draft.assets).reduce((a, b) => a + (b ?? 0), 0) : ''} onChange={(e) => setDraft((current) => ({ ...current, assets: { cash: Number(e.target.value) || 0, stocks: 0, bonds: 0, other: 0 } }))} /></label>
-      </form>
-      <section className="panel result" aria-live="polite"><div className="result-heading"><div><p className="eyebrow">当前评估</p><h2>{evaluation.kind === 'evaluated' ? '你的规划起点' : evaluation.kind === 'needs-input' ? '还差一点资料' : '请检查输入'}</h2></div><span className={`status ${evaluation.kind}`}>{evaluation.kind === 'evaluated' ? '已计算' : evaluation.kind === 'needs-input' ? '待完善' : '输入无效'}</span></div>
-        {evaluation.kind === 'evaluated' ? <><div className="metrics"><div><span>退休目标资金</span><strong>¥{Math.round(evaluation.result.retirementTarget.total).toLocaleString('zh-CN')}</strong></div><div><span>希望退休年龄</span><strong>{evaluation.result.desiredRetirement.age} 岁</strong></div><div><span>当前资产</span><strong>¥{Math.round(evaluation.result.assetPath[0]?.balance ?? 0).toLocaleString('zh-CN')}</strong></div></div><div className="chart"><div className="chart-line" style={{ height: `${Math.min(100, Math.max(8, (evaluation.result.assetPath.at(-1)?.balance ?? 0) / evaluation.result.retirementTarget.total * 100))}%` }} /><span>资产路径预览</span></div><p className="hint">金额按今天购买力输入，模型版本 {evaluation.modelVersion}。详细人生节点、收益情景和方案管理将在后续步骤加入。</p></> : <><ul className="issues">{evaluation.issues.map((issue) => <li key={`${issue.path}-${issue.code}`}><b>{issue.path}</b>：{issue.message}</li>)}</ul>{evaluation.kind === 'needs-input' && <p className="hint">已填写资产预览：¥{evaluation.preview.knownAssets.toLocaleString('zh-CN')}</p>}</>}
+    <header className="app-header"><a className="brand" href="#" aria-label="FIRE 规划首页"><span className="brand-mark">F</span> FIRE<span className="brand-desc">自由，从算清开始</span></a><span className="local-label">本地规划 · 无需账号</span></header>
+    <div className="workspace-toolbar"><div className="plan-picker"><label htmlFor="plan-select">当前方案</label><select id="plan-select" aria-label="当前方案" value={active.id} onChange={e => { inputAt.current = performance.now(); setWorkspace(current => ({ ...current, activePlanId: e.target.value })); setStep(0); }}>{workspace.plans.map(plan => <option key={plan.id} value={plan.id}>{plan.name}{plan.isExample ? '（示例）' : ''}</option>)}</select><span className="save-indicator" role="status">{saved}</span></div><div className="toolbar-actions"><button type="button" onClick={() => append(blankPlan())}>新建</button><button type="button" onClick={() => { inputAt.current = performance.now(); setWorkspace(current => copyPlan(current, active.id)); }}>复制</button><button type="button" onClick={exportJson}>导出 JSON</button><button type="button" onClick={() => fileInput.current?.click()}>导入</button></div></div>
+    <input ref={fileInput} aria-label="导入 JSON 文件" type="file" accept="application/json,.json" hidden onChange={async e => { const file = e.target.files?.[0]; if (!file) return; try { const decoded = decodePlanFile(await file.text()); if (decoded.kind !== 'decoded') { setMessage(`导入失败：${decoded.message}`); } else { append({ ...decoded.plan, id: crypto.randomUUID(), name: `${decoded.plan.name}（导入副本）` }); setMessage('已导入为新副本，现有方案已保留。'); } } catch { setMessage('导入失败：无法读取文件。现有方案已保留。'); } e.target.value = ''; }} />
+    {message && <div className="notice" role="status"><span>{message}</span><button type="button" aria-label="关闭提示" onClick={() => setMessage('')}>×</button></div>}
+    <div className="page-heading"><div><span className="section-number">FIRE PLANNER / 01</span><h1>你的生活，<br />由你来安排。</h1><p>从今天的收支，到未来的选择。用一条路径，理解退休需要的资金与时间。</p></div><div className="heading-aside"><span>一份方案，三个问题</span><p>需要多少资金<br />何时满足条件<br />每月还需投入多少</p></div></div>
+    {active.isExample && <div className="example-notice">当前为独立示例，所有数字仅用于体验。<button type="button" onClick={() => append(blankPlan())}>建立我的空白方案</button></div>}
+    {!active.isExample && workspace.plans.length === 1 && !active.draft.currentAge && <button type="button" className="example-link" onClick={() => append(examplePlan())}>先用「小林的示例」体验完整路径 →</button>}
+    <div className="mobile-summary">{stale ? '正在更新 / 最后有效结果' : '继续购买 · 基准'}<strong>{summaryResult?.kind === 'evaluated' ? attainmentText(summaryResult.result) : '待完善资料'}</strong></div>
+    <div className="workspace">
+      <section className="inputs" aria-label="规划输入"><nav className="step-nav" aria-label="六步规划">{steps.map((label, index) => <button key={label} type="button" aria-current={index === step ? 'step' : undefined} onClick={() => setStep(index)}><span>{String(index + 1).padStart(2, '0')}</span><b>{label}</b></button>)}</nav>
+        <form onSubmit={e => e.preventDefault()} className="step-form" key={active.id}><div className="step-title"><span className="section-number">STEP {String(step + 1).padStart(2, '0')} / 06</span><h2>{steps[step]}</h2></div>
+          {step === 0 ? <LifeFields {...props} /> : step === 1 ? <AssetFields {...props} /> : step === 2 ? <EventFields {...props} /> : step === 3 ? <InsuranceFields {...props} /> : step === 4 ? <AssumptionFields {...props} /> : <><p className="section-copy">希望退休年龄是一种选择；预计达标年龄来自当前假设。你可以回到任何一步，比较不同生活安排。</p><label>方案名称<input aria-label="方案名称" value={active.name} onChange={e => setWorkspace(current => ({ ...current, plans: current.plans.map(plan => plan.id === active.id ? { ...plan, name: e.target.value } : plan) }))} /></label><button type="button" className="primary" disabled={pending || evaluation?.kind !== 'evaluated'} onClick={exportReport}>导出 Markdown 报告</button><h3>与另一个方案比较</h3><label>比较对象<select aria-label="比较对象" value={compareId} onChange={e => setCompareId(e.target.value)}><option value="">选择本地方案</option>{workspace.plans.filter(row => row.id !== active.id).map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label>{comparison && <div className="comparison-summary"><h4>{workspace.plans.find(row => row.id === compareId)?.name}</h4><p className="hint">继续购买 · 基准收益 · 今天购买力</p>{comparisonResult?.kind === 'evaluated' ? <><p>所需资金：{comparisonResult.result.retirementTarget.kind === 'solved' ? formatMoney(purchasingPower(comparisonResult.result.retirementTarget.total, comparisonResult.result.desiredRetirement.month, comparison.snapshot.inputs.inflationRate)) : '求解范围不足'}</p><p>预计达标：{attainmentText(comparisonResult.result)}</p><p>追加净投入：{contributionText(comparisonResult.result)}</p></> : <p>待遇待完善</p>}<p className="hint">两种社保医保方案的完整差异见右侧结果表；切换本地方案可查看各自结果。</p></div>}{compareId && !comparison && <p>比较方案资料待完善，不能显示为零。</p>}<details className="life-note"><summary>退休以后，你想怎样过一天？</summary><p>试着留出一段时间，提前体验自己的退休生活。除了预算，还可以为作息、关系、运动与愿意持续做的事，留下位置。</p></details></>}
+          <div className="step-actions"><button type="button" className="secondary" disabled={step === 0} onClick={() => setStep(n => n - 1)}>上一步</button><span>{step + 1} / 6</span><button type="button" className="primary" disabled={step === 5} onClick={() => setStep(n => n + 1)}>下一步 →</button></div>
+        </form>
+        {evaluation && <EvaluationIssues evaluation={evaluation} />}
+        <p className="latency" data-testid="evaluation-latency">{latency === undefined ? '等待输入' : `最近一次输入 → 有效评估 ${Math.round(latency)} ms`}</p>
       </section>
-    </section>
+      <Results evaluation={evaluated} stale={stale} pending={pending} />
+    </div><footer><span>FIRE · 财务独立与提前退休规划</span><span>人民币 · 按月计算 · 数据保存在你的浏览器</span></footer>
   </main>;
 }
-
 createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);
