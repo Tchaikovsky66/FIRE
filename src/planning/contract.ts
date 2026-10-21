@@ -1,4 +1,4 @@
-import type { AssetBalances } from './asset-cash-flow';
+import type { AssetBalances } from './internal/account-cash-flow';
 import type { LifeEvent, OneOffExpense } from './life-events';
 import type { ExternalIncome, InsurancePlanInput } from './insurance';
 export const MODEL_VERSION = '1.0.0';
@@ -48,7 +48,7 @@ export type PaymentShortfall = { month: number; amount: number };
 export type RetirementTarget = { kind: 'solved'; month: number; total: number; investmentPrincipal: number; cashBuffer: number; withdrawalRatePrincipal: number; withdrawalRateTotal: number; wholePathNeed: number; precision: number };
 export type SolverIssue = { kind: 'unresolved'; reason: 'search-bound'|'numeric-error'; message: string };
 export type TargetOutcome = RetirementTarget | SolverIssue;
-export type StressResult = { retirementMonth: number; initialAssets: number; minimumBalance: number; firstShortfall?: PaymentShortfall; path: readonly AssetPathPoint[]; stockShock: number; bondShock: number };
+export type StressResult = { retirementMonth: number; initialAssets: number; minimumBalance: number; minimumRealBalance: number; minimumBalanceMonth: number; minimumRealBalanceMonth: number; firstShortfall?: PaymentShortfall; path: readonly AssetPathPoint[]; stockShock: number; bondShock: number };
 export type Attainment = { kind: 'now'|'future'; month: number; age: number; path?: readonly AssetPathPoint[] } | { kind: 'not-reached'; firstShortfall?: PaymentShortfall } | SolverIssue;
 export type AdditionalContribution = { kind: 'none'; amount: 0 } | { kind: 'monthly'|'immediate'; amount: number; precision: number } | SolverIssue;
 export type CaseResult = {

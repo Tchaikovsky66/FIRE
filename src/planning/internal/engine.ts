@@ -1,7 +1,7 @@
 import type { AssetBalances, AssetPathPoint, CompletePlanInputs, CoverageKey, PaymentShortfall, ReturnScenario, StressResult, TargetOutcome } from '../contract';
 import { budgetAtMonth, type LifeEventTimelineInput } from '../life-events';
 import { evaluateInsurancePlans } from '../insurance';
-import { applyAccountCashFlow } from '../asset-cash-flow';
+import { applyAccountCashFlow } from './account-cash-flow';
 
 export type MonthlyFlow = {
   month: number; inflationFactor: number; workIncome: number; pensionIncome: number; externalIncome: number;
@@ -12,7 +12,7 @@ export type CompiledCase = {
   inputs: CompletePlanInputs; coverage: CoverageKey; scenario: ReturnScenario; retirementMonth: number;
   endMonth: number; returns: AssetBalances; flows: readonly MonthlyFlow[]; bufferAt(month:number):number;
 };
-export type Simulation = { path: AssetPathPoint[]; finalAssets: AssetBalances; minimumBalance: number; firstShortfall?: PaymentShortfall; numericError: boolean };
+export type Simulation = { path: AssetPathPoint[]; finalAssets: AssetBalances; minimumBalance: number; minimumRealBalance: number; minimumBalanceMonth: number; minimumRealBalanceMonth: number; firstShortfall?: PaymentShortfall; numericError: boolean };
 export const assetTotal = (assets: AssetBalances) => assets.cash + assets.stocks + assets.bonds + assets.other;
 const keys = ['cash','stocks','bonds','other'] as const;
 
@@ -60,20 +60,22 @@ export function simulate(ctx:CompiledCase,options:{startMonth?:number;endMonth?:
   let assets={...(options.initialAssets??ctx.inputs.assets)};
   if(options.initialTotal!==undefined)assets=allocate(options.initialTotal,ctx.bufferAt(start),ctx.inputs.targetAllocation);
   const rates={cash:Math.pow(1+ctx.returns.cash,1/12)-1,stocks:Math.pow(1+ctx.returns.stocks,1/12)-1,bonds:Math.pow(1+ctx.returns.bonds,1/12)-1,other:Math.pow(1+ctx.returns.other,1/12)-1};
-  const path:AssetPathPoint[]=[];let minimumBalance=assetTotal(assets),firstShortfall:PaymentShortfall|undefined,numericError=false;
+  let minimumBalance=assetTotal(assets),minimumBalanceMonth=start,minimumRealBalance=minimumBalance/Math.pow(1+ctx.inputs.inflationRate,start/12),minimumRealBalanceMonth=start;
+  const trackMinimum=(month:number)=>{const nominal=assetTotal(assets),real=nominal/Math.pow(1+ctx.inputs.inflationRate,month/12);if(nominal<minimumBalance){minimumBalance=nominal;minimumBalanceMonth=month;}if(real<minimumRealBalance){minimumRealBalance=real;minimumRealBalanceMonth=month;}};
+  const path:AssetPathPoint[]=[];let firstShortfall:PaymentShortfall|undefined,numericError=false;
   for(let month=start;month<end;month++){
     const flow=ctx.flows[month];
     if(month===ctx.retirementMonth)assets=allocate(assetTotal(assets),ctx.bufferAt(month),ctx.inputs.targetAllocation);
     const openingAccounts={...assets};
     const isShock=options.stress===true&&month===ctx.retirementMonth;
     if(isShock){assets.stocks*=ctx.inputs.stockShock;assets.bonds*=ctx.inputs.bondShock;}
-    minimumBalance=Math.min(minimumBalance,assetTotal(assets));
+    trackMinimum(month);
     const additional=month<ctx.retirementMonth?(options.additionalMonthly??0)*flow.inflationFactor:0;
     const income=flow.income+additional;
     const payment=applyAccountCashFlow(assets,income-flow.spending,ctx.inputs.targetAllocation,ctx.bufferAt(month+1));
     assets=payment.assets;
     if(payment.shortfall>1e-8&&!firstShortfall)firstShortfall={month,amount:payment.shortfall};
-    minimumBalance=Math.min(minimumBalance,assetTotal(assets));
+    trackMinimum(month);
     const beforeReturn=assetTotal(assets);
     for(const key of keys)if(!(isShock&&(key==='stocks'||key==='bonds')))assets[key]*=1+rates[key];
     const returns=assetTotal(assets)-beforeReturn;
@@ -81,10 +83,10 @@ export function simulate(ctx:CompiledCase,options:{startMonth?:number;endMonth?:
     if(month>=ctx.retirementMonth&&(month-ctx.retirementMonth+1)%12===0)assets=allocate(assetTotal(assets),ctx.bufferAt(month+1),ctx.inputs.targetAllocation);
     const balance=assetTotal(assets);
     if(!Number.isFinite(balance)||!Number.isFinite(flow.spending)||!Number.isFinite(income)||keys.some(key=>!Number.isFinite(assets[key]))){numericError=true;break;}
-    minimumBalance=Math.min(minimumBalance,balance);
+    trackMinimum(month);
     if(options.collect!==false)path.push({month,age:ctx.inputs.currentAge+month/12,balance,income,spending:flow.spending,shortfall:payment.shortfall,inflationFactor:flow.inflationFactor,accounts:{...assets},openingAccounts,returns,investmentTransfer:payment.investmentTransfer,internalTransferNet:0,cashUsed:payment.cashUsed,bufferTarget:ctx.bufferAt(month+1),bufferShortage:Math.max(0,ctx.bufferAt(month+1)-assets.cash),livingExpense:flow.livingExpense,debtPayment:flow.debtPayment,oneOffExpense:flow.oneOffExpense,pensionIncome:flow.pensionIncome,externalIncome:flow.externalIncome,contribution:flow.contribution,medicalSelfPay:flow.medicalSelfPay});
   }
-  return {path,finalAssets:assets,minimumBalance,firstShortfall,numericError};
+  return {path,finalAssets:assets,minimumBalance,minimumRealBalance,minimumBalanceMonth,minimumRealBalanceMonth,firstShortfall,numericError};
 }
 
 export function solveTarget(ctx:CompiledCase):TargetOutcome{
@@ -109,5 +111,5 @@ export function solveTarget(ctx:CompiledCase):TargetOutcome{
 }
 export function stressSummary(ctx:CompiledCase,initialTotal:number):StressResult{
   const s=simulate(ctx,{startMonth:ctx.retirementMonth,initialTotal,stress:true});
-  return {retirementMonth:ctx.retirementMonth,initialAssets:initialTotal,minimumBalance:s.minimumBalance,firstShortfall:s.firstShortfall,path:s.path,stockShock:ctx.inputs.stockShock,bondShock:ctx.inputs.bondShock};
+  return {retirementMonth:ctx.retirementMonth,initialAssets:initialTotal,minimumBalance:s.minimumBalance,minimumRealBalance:s.minimumRealBalance,minimumBalanceMonth:s.minimumBalanceMonth,minimumRealBalanceMonth:s.minimumRealBalanceMonth,firstShortfall:s.firstShortfall,path:s.path,stockShock:ctx.inputs.stockShock,bondShock:ctx.inputs.bondShock};
 }

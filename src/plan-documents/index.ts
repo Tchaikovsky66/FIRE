@@ -26,7 +26,7 @@ const assets = object({ cash: number(), stocks: number(), bonds: number(), other
 const allocation = object({ cash: number(0, 1), stocks: number(0, 1), bonds: number(0, 1), other: number(0, 1) });
 const returns = object({ cash: rate, stocks: rate, bonds: rate, other: rate });
 const income = object({ id: text, label: text, monthlyAmount: number(), startMonth: month, endMonth: month, annualGrowthRate: rate, growth: choice('real', 'nominal') }, ['id', 'monthlyAmount', 'startMonth', 'endMonth']);
-const pension = object({ status: choice('unknown', 'none', 'known'), startMonth: month, monthlyAmount: number(), annualGrowthRate: rate, existingRights: boolean, growth: choice('real', 'nominal') }, ['status']);
+const pension = object({ status: choice('unknown', 'none', 'known'), startMonth: month, monthlyAmount: number(), annualGrowthRate: rate, existingRights: boolean, amountBasis: choice('today', 'start-month'), growth: choice('real', 'nominal') }, ['status']);
 const insurance = object({ contributionMonthly: number(), contributionStartMonth: month, contributionEndMonth: month, contributionsAlreadyDeducted: boolean, medicalSelfPayMonthly: number(), pension, externalIncome: list(income), coverageNotes: text, contributionGrowth: choice('real', 'nominal'), medicalGrowth: choice('real', 'nominal') }, ['contributionMonthly', 'contributionStartMonth', 'contributionEndMonth', 'contributionsAlreadyDeducted', 'medicalSelfPayMonthly', 'pension', 'externalIncome']);
 const schema: Record<string, Validator> = {
   currentAge: number(0, 150), desiredRetirementAge: number(0, 150), planningEndAge: number(0, 150),

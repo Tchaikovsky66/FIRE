@@ -57,7 +57,7 @@ export function renderMarkdownReport(evaluation: ReportSnapshot): string {
       `未来缴费：${coverage === 'stop' ? '从现在起不再计入' : `${formatMoney(plan.contributionMonthly)}/月，${atMonth(plan.contributionStartMonth)} 至 ${atMonth(plan.contributionEndMonth)}（结束月不含）`}`,
       `在职个人缴费：${plan.contributionsAlreadyDeducted ? '已从到手工资扣除，不重复扣减；离职后自行缴费仍按设定处理' : '按单独支出处理'}`,
       `医疗自付：每月 ${formatMoney(plan.medicalSelfPayMonthly)}`,
-      `养老金：${plan.pension.status === 'unknown' ? '待完善' : plan.pension.status === 'none' ? '明确没有该项待遇' : `${formatMoney(plan.pension.monthlyAmount)}/月，从 ${atMonth(plan.pension.startMonth!)} 开始，年增长 ${percent(plan.pension.annualGrowthRate ?? 0)}`}`,
+      `养老金：${plan.pension.status === 'unknown' ? '待完善' : plan.pension.status === 'none' ? '明确没有该项待遇' : `${formatMoney(plan.pension.monthlyAmount)}/月（${plan.pension.amountBasis === 'start-month' ? '起领月名义金额' : '今天购买力'}），从 ${atMonth(plan.pension.startMonth!)} 开始，年增长 ${percent(plan.pension.annualGrowthRate ?? 0)}`}`,
       '已有养老金权益按输入保留；资格、医保衔接和待遇有效性需用户核对。');
     for (const income of [...inputs.externalIncome ?? [], ...plan.externalIncome]) lines.push(`组合外收入 ${escape(income.id)}：${atMonth(income.startMonth)} 至 ${atMonth(income.endMonth)}（结束月不含），每月 ${formatMoney(income.monthlyAmount)}，${income.growth === 'nominal' ? '固定名义口径' : '按购买力增长口径'}，年增长 ${percent(income.annualGrowthRate ?? 0)}`);
     for (const item of evaluation.cases.filter(item => item.key.coverage === coverage)) {
@@ -66,7 +66,7 @@ export function renderMarkdownReport(evaluation: ReportSnapshot): string {
       if (outcome.kind === 'needs-input') {
         lines.push('状态：待完善');
         for (const issue of outcome.issues) lines.push(`- ${escape(issue.message)}（${escape(issue.path)}；${issue.code}）`);
-      } else if (outcome.kind === 'unresolved') lines.push(`状态：无法在当前搜索范围求解（${escape(outcome.message)}）`);
+      } else if (outcome.kind === 'unresolved') lines.push(`状态：${outcome.reason === 'numeric-error' ? '计算数值错误' : '无法在当前搜索范围求解'}（${escape(outcome.message)}）`);
       else appendCaseResult(lines, outcome.result, amount, atMonth);
     }
   }
@@ -84,6 +84,6 @@ function appendCaseResult(lines: string[], result: CaseResult, amount: (value: n
   if (result.firstShortfall) lines.push(`首次付款不足：${atMonth(result.firstShortfall.month)}，未覆盖 ${amount(result.firstShortfall.amount, result.firstShortfall.month)}`);
   if (result.stress) {
     const stress = result.stress;
-    lines.push('#### 压力测试', `退休起点：${atMonth(stress.retirementMonth)}；初始资金 ${amount(stress.initialAssets, stress.retirementMonth)}`, `路径最低余额：${formatMoney(stress.minimumBalance)}（路径各时点名义金额）`, stress.firstShortfall ? `首次资金不足：${atMonth(stress.firstShortfall.month)}，未覆盖 ${amount(stress.firstShortfall.amount, stress.firstShortfall.month)}` : '压力测试路径未出现付款不足。');
+    lines.push('#### 压力测试', `退休起点：${atMonth(stress.retirementMonth)}；初始资金 ${amount(stress.initialAssets, stress.retirementMonth)}`, `路径最低名义余额：${formatMoney(stress.minimumBalance)}（${atMonth(stress.minimumBalanceMonth)}）`, `路径最低实际购买力余额：${formatMoney(stress.minimumRealBalance)}（今天购买力；${atMonth(stress.minimumRealBalanceMonth)}）`, stress.firstShortfall ? `首次资金不足：${atMonth(stress.firstShortfall.month)}，未覆盖 ${amount(stress.firstShortfall.amount, stress.firstShortfall.month)}` : '压力测试路径未出现付款不足。');
   }
 }
