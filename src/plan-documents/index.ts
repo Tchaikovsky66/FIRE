@@ -26,7 +26,11 @@ const assets = object({ cash: number(), stocks: number(), bonds: number(), other
 const allocation = object({ cash: number(0, 1), stocks: number(0, 1), bonds: number(0, 1), other: number(0, 1) });
 const returns = object({ cash: rate, stocks: rate, bonds: rate, other: rate });
 const income = object({ id: text, label: text, monthlyAmount: number(), startMonth: month, endMonth: month, annualGrowthRate: rate, growth: choice('real', 'nominal') }, ['id', 'monthlyAmount', 'startMonth', 'endMonth']);
-const pension = object({ status: choice('unknown', 'none', 'known'), startMonth: month, monthlyAmount: number(), annualGrowthRate: rate, existingRights: boolean, amountBasis: choice('today', 'start-month'), growth: choice('real', 'nominal') }, ['status']);
+const pensionMetadata = { status: choice('unknown', 'none', 'known'), existingRights: boolean, amountBasis: choice('today', 'start-month'), growth: choice('real', 'nominal') };
+const finiteNumber: Validator = value => typeof value === 'number' && Number.isFinite(value);
+const activePension = object({ ...pensionMetadata, startMonth: month, monthlyAmount: number(), annualGrowthRate: rate }, ['status']);
+const inactivePension = object({ ...pensionMetadata, startMonth: finiteNumber, monthlyAmount: finiteNumber, annualGrowthRate: finiteNumber }, ['status']);
+const pension: Validator = value => value !== null && typeof value === 'object' && (value as Record<string, unknown>).status === 'known' ? activePension(value) : inactivePension(value);
 const insurance = object({ contributionMonthly: number(), contributionStartMonth: month, contributionEndMonth: month, contributionsAlreadyDeducted: boolean, medicalSelfPayMonthly: number(), pension, externalIncome: list(income), coverageNotes: text, contributionGrowth: choice('real', 'nominal'), medicalGrowth: choice('real', 'nominal') }, ['contributionMonthly', 'contributionStartMonth', 'contributionEndMonth', 'contributionsAlreadyDeducted', 'medicalSelfPayMonthly', 'pension', 'externalIncome']);
 const schema: Record<string, Validator> = {
   currentAge: number(0, 150), desiredRetirementAge: number(0, 150), planningEndAge: number(0, 150),
@@ -109,5 +113,17 @@ export function copyPlan(workspace: Workspace, id: string): Workspace {
   const nextId = uniqueId(`${source.id}-copy`, workspace.plans); const copy = { ...source, id: nextId, name: `${source.name} 副本`, draft: structuredClone(source.draft), isExample: false };
   return { plans: [...workspace.plans, copy], activePlanId: nextId };
 }
-export function renamePlan(workspace: Workspace, id: string, name: string): Workspace { return { ...workspace, plans: workspace.plans.map(plan => plan.id === id ? { ...plan, name } : plan) }; }
+export function renamePlan(workspace: Workspace, id: string, name: string): Workspace {
+  const trimmed = name.trim();
+  if (!trimmed || trimmed.length > 500) return workspace;
+  return { ...workspace, plans: workspace.plans.map(plan => plan.id === id ? { ...plan, name: trimmed } : plan) };
+}
+/** Call the blank factory only when deletion actually empties the workspace. */
+export function deletePlan(workspace: Workspace, id: string, blank: () => NamedPlan): Workspace {
+  const index = workspace.plans.findIndex(plan => plan.id === id);
+  if (index < 0) return workspace;
+  const plans = workspace.plans.filter(plan => plan.id !== id);
+  if (!plans.length) return createWorkspace(blank());
+  return { plans, activePlanId: workspace.activePlanId === id ? plans[Math.min(index, plans.length - 1)].id : workspace.activePlanId };
+}
 export function selectPlan(workspace: Workspace, id: string): Workspace { return workspace.plans.some(plan => plan.id === id) ? { ...workspace, activePlanId: id } : workspace; }

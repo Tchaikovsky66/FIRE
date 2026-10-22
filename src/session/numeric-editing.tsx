@@ -15,6 +15,7 @@ export function useNumericEditing() {
     return next;
   });
   return {
+    forgetPlan: (planId: string) => setEdits(current => { const next = new Map(current); next.delete(planId); return next; }),
     forPlan: (planId: string | undefined) => planId ? edits.get(planId) ?? new Map<string, NumericEdit>() : new Map<string, NumericEdit>(),
     write: (planId: string, id: string, edit: NumericEdit) => update(planId, current => {
       const next = new Map(current);
@@ -44,7 +45,7 @@ export function NumericEditingProvider({ children, ...value }: EditingContextVal
   return <EditingContext.Provider value={value}>{children}</EditingContext.Provider>;
 }
 
-export function useNumericField({ id, group, label, value, min, allowEmpty, onCommit }: { id: string; group?: string; label: string; value: number | undefined; min: number; allowEmpty: boolean; onCommit: (value: number | undefined) => void }) {
+export function useNumericField({ id, group, label, value, min, integer = false, allowEmpty, onCommit }: { id: string; group?: string; label: string; value: number | undefined; min: number; integer?: boolean; allowEmpty: boolean; onCommit: (value: number | undefined) => void }) {
   const context = useContext(EditingContext);
   if (!context) throw new Error('Numeric fields require a Session editing provider');
   const edit = context.edits.get(id);
@@ -56,7 +57,7 @@ export function useNumericField({ id, group, label, value, min, allowEmpty, onCo
     issue: current?.issue,
     change: (nextRaw: string) => {
       const next = parse(nextRaw);
-      const issue = next === undefined ? allowEmpty ? undefined : 'missing' : !Number.isFinite(next) || next < min ? 'invalid' : undefined;
+      const issue = next === undefined ? allowEmpty ? undefined : 'missing' : !Number.isFinite(next) || next < min || (integer && !Number.isInteger(next)) ? 'invalid' : undefined;
       context.onInput();
       if (!issue) onCommit(next);
       context.write(id, { raw: nextRaw, label, value: issue ? value : next, issue, group });

@@ -49,6 +49,19 @@ describe('evaluatePlan', () => {
     expect(invalid.kind).toBe('invalid');
     if (invalid.kind === 'invalid') expect(invalid.issues.some((issue) => issue.path === 'currentAge')).toBe(true);
   });
+
+  it.each(['none', 'unknown'] as const)('ignores inactive pension values for %s and validates them again when known', status => {
+    const stop = { ...validPlan.coveragePlans!.stop!, pension: { status, startMonth: -180, monthlyAmount: 1200, annualGrowthRate: -2 } };
+    const draft = { ...validPlan, coveragePlans: { ...validPlan.coveragePlans, stop } };
+    const evaluation = evaluatePlan(draft);
+    expect(evaluation.kind).toBe('evaluated');
+    if (evaluation.kind !== 'evaluated') return;
+    expect(evaluation.snapshot.inputs.coveragePlans.stop.pension).toEqual(stop.pension);
+    expect(evaluation.cases.find(row => row.key.coverage === 'stop')?.outcome.kind).toBe(status === 'none' ? 'evaluated' : 'needs-input');
+    const active = evaluatePlan({ ...draft, coveragePlans: { ...draft.coveragePlans, stop: { ...stop, pension: { ...stop.pension, status: 'known' } } } });
+    expect(active.kind).toBe('invalid');
+    if (active.kind === 'invalid') expect(active.issues).toContainEqual(expect.objectContaining({ path: 'coveragePlans.stop.pension.startMonth' }));
+  });
 });
 
 it('requires an explicit retirement budget and preserves a deliberate zero', () => {

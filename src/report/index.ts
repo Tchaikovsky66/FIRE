@@ -1,5 +1,6 @@
 import type { AdditionalContribution, Attainment, CaseResult, EvaluatedPlan } from '../planning/contract';
-import { formatAge, formatMoney, monthLabel, purchasingPower } from '../display';
+import { coverageNames, formatAge, formatMoney, monthLabel, purchasingPower } from '../display';
+import { planIssueText } from '../display/validation';
 
 export type ReportSnapshot = EvaluatedPlan;
 const scenarioLabels = { conservative: '保守', baseline: '基准', optimistic: '乐观' };
@@ -57,19 +58,19 @@ export function renderMarkdownReport(evaluation: ReportSnapshot): string {
       const missing = [plan.pension.startMonth === undefined ? '起领时间' : '', plan.pension.monthlyAmount === undefined ? '月净金额' : ''].filter(Boolean);
       return missing.length ? `待完善（缺少${missing.join('、')}）` : `${formatMoney(plan.pension.monthlyAmount!)}/月（${plan.pension.amountBasis === 'start-month' ? '起领月名义金额' : '今天购买力'}），从 ${atMonth(plan.pension.startMonth!)} 开始，年增长 ${percent(plan.pension.annualGrowthRate ?? 0)}`;
     })();
-    lines.push('', `## ${coverage === 'continue' ? '继续购买' : '不再购买'}社保医保`,
+    lines.push('', `## ${coverageNames[coverage]}`,
       `未来缴费：${coverage === 'stop' ? '从现在起不再计入' : `${formatMoney(plan.contributionMonthly)}/月，${atMonth(plan.contributionStartMonth)} 至 ${atMonth(plan.contributionEndMonth)}（结束月不含）`}`,
       `在职个人缴费：${plan.contributionsAlreadyDeducted ? '已从到手工资扣除，不重复扣减；离职后自行缴费仍按设定处理' : '按单独支出处理'}`,
       `医疗自付：每月 ${formatMoney(plan.medicalSelfPayMonthly)}`,
       `养老金：${pensionText}`,
-      '已有养老金权益按输入保留；资格、医保衔接和待遇有效性需用户核对。');
+      '养老金估计应考虑过去已缴费的记录和可能享有的待遇；停止缴费不等于记录清零，领取资格、时间与金额需核实。');
     for (const income of [...inputs.externalIncome ?? [], ...plan.externalIncome]) lines.push(`组合外收入 ${escape(income.label ?? income.id)}：${atMonth(income.startMonth)} 至 ${atMonth(income.endMonth)}（结束月不含），每月 ${formatMoney(income.monthlyAmount)}，${income.growth === 'real' ? '按购买力增长口径' : '固定名义口径'}，年增长 ${percent(income.annualGrowthRate ?? 0)}`);
     for (const item of evaluation.cases.filter(item => item.key.coverage === coverage)) {
       lines.push('', `### ${scenarioLabels[item.key.returns]}收益情景`);
       const outcome = item.outcome;
       if (outcome.kind === 'needs-input') {
         lines.push('状态：待完善');
-        for (const issue of outcome.issues) lines.push(`- ${escape(issue.message)}（${escape(issue.path)}；${issue.code}）`);
+        for (const issue of outcome.issues) lines.push(`- ${escape(planIssueText(issue, inputs))}`);
       } else if (outcome.kind === 'unresolved') lines.push(`状态：${outcome.reason === 'numeric-error' ? '计算数值错误' : '无法在当前搜索范围求解'}（${escape(outcome.message)}）`);
       else appendCaseResult(lines, outcome.result, amount, atMonth);
     }

@@ -1,3 +1,4 @@
+export const coverageNames = { continue: '继续缴纳社保医保', stop: '从现在起停止缴纳社保医保' } as const;
 const money = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 0 });
 export function formatMoney(value: number | undefined): string {
   if (value === undefined || !Number.isFinite(value)) return '待完善';

@@ -80,8 +80,8 @@ test('blank plan becomes a complete six-step workspace through real input', asyn
   await expect(page.locator('.step-title h2')).toHaveText('现在的基础');
   for (const [label, value] of [['月税后工作收入', '10000'], ['现金', '500000'], ['股票 / 基金', '0'], ['债券 / 存款', '0'], ['其他可投资资产', '0']]) await page.getByLabel(label, { exact: true }).fill(value);
   await goStep(page, '保障与收入');
-  await page.getByLabel('continue养老金待遇', { exact: true }).selectOption('none');
-  await page.getByLabel('stop养老金待遇', { exact: true }).selectOption('none');
+  await page.getByLabel('继续缴纳社保医保 · 养老金待遇', { exact: true }).selectOption('none');
+  await page.getByLabel('从现在起停止缴纳社保医保 · 养老金待遇', { exact: true }).selectOption('none');
   await currentResult(page);
   await expect(page.getByTestId('funding-chart')).toBeVisible();
   await expect(page.locator('.results table').first().locator('tbody tr')).toHaveCount(6);
@@ -195,17 +195,17 @@ test('life events keep precise month, age, date and timeline editing in sync', a
 test('insurance unknowns stay case-local and assumptions update graphs with reduced motion', async ({ page }) => {
   await example(page);
   await goStep(page, '保障与收入');
-  await page.getByLabel('continue养老金待遇', { exact: true }).selectOption('unknown');
+  await page.getByLabel('继续缴纳社保医保 · 养老金待遇', { exact: true }).selectOption('unknown');
   await currentResult(page);
-  await expect(page.locator('.results .validation')).toContainText('继续购买 · 待完善');
+  await expect(page.locator('.results .validation')).toContainText('继续缴纳社保医保 · 待完善');
   await expect(page.getByTestId('target-total')).toHaveCount(0);
-  await page.locator('.result-controls').getByRole('button', { name: '不再购买', exact: true }).click();
+  await page.locator('.result-controls').getByRole('button', { name: '从现在起停止缴纳社保医保', exact: true }).click();
   await expect(page.getByTestId('target-total')).toBeVisible();
   const rows = page.locator('.results table').first().locator('tbody tr');
   await expect(rows.filter({ hasText: '待遇待完善' })).toHaveCount(3);
-  await page.getByLabel('continue养老金待遇', { exact: true }).selectOption('known');
+  await page.getByLabel('继续缴纳社保医保 · 养老金待遇', { exact: true }).selectOption('known');
   await currentResult(page);
-  await page.locator('.result-controls').getByRole('button', { name: '继续购买', exact: true }).click();
+  await page.locator('.result-controls').getByRole('button', { name: '继续缴纳社保医保', exact: true }).click();
   const beforeIncome = await page.getByTestId('funding-chart').locator('.balance-line').getAttribute('d');
   await page.getByRole('button', { name: '添加组合外收入', exact: true }).click();
   await page.getByLabel('月净收入', { exact: true }).fill('1000');
@@ -241,7 +241,7 @@ test('local plan copies, comparison, JSON exchange, invalid imports and reports 
   const reportEvent = page.waitForEvent('download');
   await page.getByRole('button', { name: '导出 Markdown 报告', exact: true }).click();
   const report = await readFile((await (await reportEvent).path())!, 'utf8');
-  expect(report).toContain('压力测试'); expect(report).toContain('继续购买'); expect(report).toContain('不再购买');
+  expect(report).toContain('压力测试'); expect(report).toContain('继续缴纳社保医保'); expect(report).toContain('从现在起停止缴纳社保医保');
   const jsonEvent = page.waitForEvent('download');
   await page.getByRole('button', { name: '导出 JSON', exact: true }).click();
   const text = await readFile((await (await jsonEvent).path())!, 'utf8');
@@ -321,7 +321,7 @@ test('partial numeric edits survive steps and plans without replacing valid draf
   await goStep(page, '现在的基础');
   await goStep(page, '生活与时间');
   await expect(page.getByLabel('退休后年生活费', { exact: true })).toHaveValue('');
-  await page.getByText('刚性与弹性预算', { exact: true }).click();
+  await page.getByText('必要与可调整的生活开销（刚性 / 弹性预算）', { exact: true }).click();
   await page.getByLabel('退休后其中刚性支出', { exact: true }).fill('0');
   await page.getByLabel('退休后年生活费', { exact: true }).fill('0');
   await currentResult(page);

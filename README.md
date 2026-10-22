@@ -20,6 +20,14 @@ npm run build
 npm run preview -- --host 127.0.0.1
 ```
 
+## GitHub Pages 发布
+
+站点地址：<https://tchaikovsky66.github.io/FIRE/>。推送 `main` 后，`Deploy GitHub Pages` 工作流依次执行单元测试、Pages 生产构建、桌面与手机浏览器测试，再发布 `dist/`。也可在 Actions 中手动运行此工作流。
+
+`npm run build:pages` 为静态资源配置 `/FIRE/` 前缀；本地开发和普通构建仍使用根路径。仓库 Pages 设置的发布源需为 GitHub Actions；私有仓库需账号套餐支持 Pages。发布不改变浏览器本地保存机制，原本地开发地址的方案需通过 JSON 导出并在新站点导入。
+
+部署选择与限制见 [发布决策](docs/decisions-deployment.md)。
+
 ## 使用
 
 1. 建立空白方案，或载入明确标识的示例体验。无收入、无某类资产请明确填 0；空白与零不同。
@@ -62,4 +70,4 @@ npm run test:e2e
 - [领域术语](GLOSSARY.md)
 - [视频总结](downloads/BV1eTHZ6gENk_FIRE/summary.md)
 
-首版不包含政策资格推算、实时行情、证券推荐、历史回测或蒙特卡洛概率、动态提款护栏、账号同步或外部发布。原始视频、抽帧、运行日志、私有配置与个人财务导出不纳入 Git。
+首版不包含政策资格推算、实时行情、证券推荐、历史回测或蒙特卡洛概率、动态提款护栏或账号同步。原始视频、抽帧、运行日志、私有配置与个人财务导出不纳入 Git。
