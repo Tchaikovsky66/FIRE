@@ -71,3 +71,9 @@ npm run test:e2e
 - [视频总结](downloads/BV1eTHZ6gENk_FIRE/summary.md)
 
 首版不包含政策资格推算、实时行情、证券推荐、历史回测或蒙特卡洛概率、动态提款护栏或账号同步。原始视频、抽帧、运行日志、私有配置与个人财务导出不纳入 Git。
+
+## 界面组件
+
+交互组件使用 [Rare UI](https://rareui.com)：Animated Counter、Duration Picker、Delete Button 和 Folder Component。源码位于 `src/components/ui/`，中文无障碍标签与规划数据适配位于工作台。Duration Picker 在本项目表示年月或年/月时长，精确输入仍保留。
+
+Tailwind CSS 4 通过 Vite 插件构建；shadcn 的别名与注册源配置见 `components.json`。上游授权与本地调整见 `THIRD_PARTY_NOTICES.md`。

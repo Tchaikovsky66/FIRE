@@ -55,6 +55,7 @@ test('external income names keep focus and duplicate labels preserve independent
   expect(incomes.map((income: { label: string }) => income.label)).toEqual(['side income', 'side income']);
   expect(new Set(incomes.map((income: { id: string }) => income.id)).size).toBe(2);
   await page.getByRole('button', { name: '删除收入', exact: true }).nth(0).click();
+  await page.getByRole('button', { name: '确认删除收入', exact: true }).click();
   await expect(page.getByLabel('月净收入', { exact: true })).toHaveValue('2000');
   await currentResult(page);
   await goStep(page, '退休路径');
@@ -70,7 +71,7 @@ test('blank plan becomes a complete six-step workspace through real input', asyn
   page.on('pageerror', error => errors.push(String(error)));
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
   await page.goto('/');
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('你的生活，由你来安排。');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('认真规划，自由生活。');
   await expect(page.getByLabel('当前年龄', { exact: true })).toHaveValue('');
   await expect(page.getByLabel('希望退休年龄', { exact: true })).toHaveValue('');
   await expect(page.getByText('先留一点空间给未来', { exact: true })).toBeVisible();
@@ -180,6 +181,7 @@ test('life events keep precise month, age, date and timeline editing in sync', a
   await expect(page.locator('.inputs .validation')).toContainText('同月有多个完整预算');
   await expect(page.locator('.results .save-indicator')).toHaveText('最后有效结果');
   await page.getByRole('button', { name: '删除节点', exact: true }).nth(1).click();
+  await page.getByRole('button', { name: '确认删除节点', exact: true }).click();
   await currentResult(page);
   const beforeExpense = await page.getByTestId('funding-chart').locator('.balance-line').getAttribute('d');
   await page.getByRole('button', { name: '添加一次性支出', exact: true }).click();
@@ -335,11 +337,13 @@ test('dynamic numeric edit identity survives row removal and linked date control
   await page.getByLabel('月净收入', { exact: true }).nth(0).fill('1000');
   await page.getByLabel('月净收入', { exact: true }).nth(1).fill('-');
   await page.getByRole('button', { name: '删除收入', exact: true }).nth(0).click();
+  await page.getByRole('button', { name: '确认删除收入', exact: true }).click();
   await expect(page.getByLabel('月净收入', { exact: true })).toHaveValue('-');
   await goStep(page, '生活与时间');
   await goStep(page, '保障与收入');
   await expect(page.getByLabel('月净收入', { exact: true })).toHaveValue('-');
   await page.getByRole('button', { name: '删除收入', exact: true }).click();
+  await page.getByRole('button', { name: '确认删除收入', exact: true }).click();
   await currentResult(page);
   await goStep(page, '未来变化');
   await page.getByRole('button', { name: '添加人生节点', exact: true }).click();

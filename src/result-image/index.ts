@@ -26,7 +26,7 @@ export async function downloadResultImage(source: HTMLElement, planName: string)
       }
     }
     const { toBlob } = await import('html-to-image');
-    const blob = await toBlob(clone, { backgroundColor: '#141615', pixelRatio: 2, skipFonts: true });
+    const blob = await toBlob(clone, { backgroundColor: '#ffffff', pixelRatio: 2, skipFonts: true });
     if (!blob) throw new Error('图片生成失败');
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');

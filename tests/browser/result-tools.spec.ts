@@ -12,7 +12,7 @@ async function example(page: Page) {
 }
 async function remove(page: Page) {
   await page.getByRole('button', { name: '删除方案', exact: true }).click();
-  await page.getByRole('dialog').getByRole('button', { name: '确认删除', exact: true }).click();
+  await page.getByRole('button', { name: '确认删除方案', exact: true }).click();
 }
 
 test('rename, cancel, delete and reload preserve only remaining plans', async ({ page }) => {
@@ -27,8 +27,8 @@ test('rename, cancel, delete and reload preserve only remaining plans', async ({
   await page.getByRole('button', { name: '保存名称', exact: true }).click();
   await expect(picker.locator('option:checked')).toContainText('春日退休计划');
   await page.getByRole('button', { name: '删除方案', exact: true }).click();
-  await expect(page.getByRole('dialog')).toContainText('春日退休计划');
-  await page.getByRole('button', { name: '取消', exact: true }).click();
+  await expect(page.getByRole('group', { name: '删除方案确认' })).toBeVisible();
+  await page.getByRole('button', { name: '取消删除方案', exact: true }).click();
   await expect(picker).toHaveValue(original);
   await page.getByRole('button', { name: '复制', exact: true }).click();
   await current(page);

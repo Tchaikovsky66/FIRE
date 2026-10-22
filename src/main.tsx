@@ -1,4 +1,7 @@
 import { StrictMode, useEffect, useRef, useState } from 'react';
+import { MotionConfig } from 'motion/react';
+import { DeleteButton } from '@/components/ui/delete-button';
+import { FileImportDialog } from './workbench/FileImportDialog';
 import { createRoot } from 'react-dom/client';
 import { type PlanDraft } from './planning';
 import { usePlanningSession } from './session';
@@ -34,7 +37,8 @@ function App() {
   const [saved, setSaved] = useState('正在保存');
   const [savedWorkspace, setSavedWorkspace] = useState<Workspace>();
   const [compareId, setCompareId] = useState('');
-  const [planAction, setPlanAction] = useState<'rename' | 'delete'>();
+  const [planAction, setPlanAction] = useState<'rename'>();
+  const [importOpen, setImportOpen] = useState(false);
   const numericEditing = useNumericEditing();
   const fileInput = useRef<HTMLInputElement>(null);
   const active = workspace.plans.find(plan => plan.id === workspace.activePlanId) ?? workspace.plans[0];
@@ -63,6 +67,16 @@ function App() {
     setPersistenceBlocked(false); setStep(0); setPlanAction(undefined);
     setMessage(`已删除「${active.name}」。`);
   };
+  const importFile = async (file: File) => {
+    try {
+      const decoded = decodePlanFile(await file.text());
+      if (decoded.kind !== 'decoded') setMessage(`导入失败：${decoded.message}`);
+      else {
+        append({ ...decoded.plan, id: crypto.randomUUID(), name: `${decoded.plan.name}（导入副本）` });
+        setImportOpen(false); setMessage('已导入为新副本，现有方案已保留。');
+      }
+    } catch { setMessage('导入失败：无法读取文件。现有方案已保留。'); }
+  };
   const exportJson = () => { if (hasEditingIssues || !validatePlanDraft(active.draft)) { setMessage('请先完成或修正无效数字，再导出有效方案；最后已保存的数据仍被保留。'); return; } download(encodePlanFile(active), `FIRE-${active.name}.json`, 'application/json'); setMessage('JSON 备份已生成，包含输入和假设，不包含旧计算缓存。'); };
   const exportReport = () => { if (pending || !evaluation || evaluation.kind !== 'evaluated') return; download(renderMarkdownReport(evaluation), `FIRE-${active.name}.md`, 'text/markdown;charset=utf-8'); setMessage('Markdown 报告已从当前同一评估快照生成。'); };
   const evaluated = evaluation?.kind === 'evaluated' ? evaluation : lastValid;
@@ -74,11 +88,12 @@ function App() {
   const summaryResult = evaluated?.cases.find(row => row.key.coverage === 'continue' && row.key.returns === 'baseline')?.outcome;
   return <main className="app">
     <header className="app-header"><a className="brand" href="#" aria-label="FIRE 规划首页"><span className="brand-mark">F</span> FIRE<span className="brand-desc">自由，从算清开始</span></a><span className="local-label">本地规划 · 无需账号</span></header>
-    <div className="workspace-toolbar"><div className="plan-picker"><label htmlFor="plan-select">当前方案</label><select id="plan-select" aria-label="当前方案" value={active.id} onChange={e => { markInput(); setWorkspace(current => ({ ...current, activePlanId: e.target.value })); setStep(0); }}>{workspace.plans.map(plan => <option key={plan.id} value={plan.id}>{plan.name}{plan.isExample ? '（示例）' : ''}</option>)}</select><span className="save-indicator" role="status">{hasEditingIssues ? '有效输入已保留；有未完成编辑' : !persistenceBlocked && savedWorkspace !== workspace ? '正在保存' : saved}</span></div><div className="toolbar-actions"><button type="button" onClick={() => append(blankPlan())}>新建</button><button type="button" onClick={() => { markInput(); setWorkspace(current => copyPlan(current, active.id)); }}>复制</button><button type="button" onClick={() => setPlanAction('rename')}>修改名称</button><button type="button" className="danger-button" onClick={() => setPlanAction('delete')}>删除方案</button><button type="button" onClick={exportJson}>导出 JSON</button><button type="button" onClick={() => fileInput.current?.click()}>导入</button></div></div>
-    {planAction && <PlanActionDialog action={planAction} name={active.name} onClose={() => setPlanAction(undefined)} onRename={renameActive} onDelete={deleteActive} />}
-    <input ref={fileInput} aria-label="导入 JSON 文件" type="file" accept="application/json,.json" hidden onChange={async e => { const file = e.target.files?.[0]; if (!file) return; try { const decoded = decodePlanFile(await file.text()); if (decoded.kind !== 'decoded') { setMessage(`导入失败：${decoded.message}`); } else { append({ ...decoded.plan, id: crypto.randomUUID(), name: `${decoded.plan.name}（导入副本）` }); setMessage('已导入为新副本，现有方案已保留。'); } } catch { setMessage('导入失败：无法读取文件。现有方案已保留。'); } e.target.value = ''; }} />
+    <div className="workspace-toolbar"><div className="plan-picker"><label htmlFor="plan-select">当前方案</label><select id="plan-select" aria-label="当前方案" value={active.id} onChange={e => { markInput(); setWorkspace(current => ({ ...current, activePlanId: e.target.value })); setStep(0); }}>{workspace.plans.map(plan => <option key={plan.id} value={plan.id}>{plan.name}{plan.isExample ? '（示例）' : ''}</option>)}</select><span className="save-indicator" role="status">{hasEditingIssues ? '有效输入已保留；有未完成编辑' : !persistenceBlocked && savedWorkspace !== workspace ? '正在保存' : saved}</span></div><div className="toolbar-actions"><button type="button" onClick={() => append(blankPlan())}>新建</button><button type="button" onClick={() => { markInput(); setWorkspace(current => copyPlan(current, active.id)); }}>复制</button><button type="button" onClick={() => setPlanAction('rename')}>修改名称</button><DeleteButton key={active.id} label="删除方案" onConfirm={deleteActive} /><button type="button" onClick={exportJson}>导出 JSON</button><button type="button" className="import-trigger" onClick={() => { setMessage(''); setImportOpen(true); }}>导入 ↗</button></div></div>
+    {planAction && <PlanActionDialog name={active.name} onClose={() => setPlanAction(undefined)} onRename={renameActive} />}
+    {importOpen && <FileImportDialog onClose={() => setImportOpen(false)} onChoose={() => fileInput.current?.click()} onImport={importFile} message={message} />}
+    <input ref={fileInput} aria-label="导入 JSON 文件" type="file" accept="application/json,.json" hidden onChange={async e => { const file = e.target.files?.[0]; if (file) await importFile(file); e.target.value = ''; }} />
     {message && <div className="notice" role="status"><span>{message}</span><button type="button" aria-label="关闭提示" onClick={() => setMessage('')}>×</button></div>}
-    <div className="page-heading"><div><span className="section-number">FIRE PLANNER / 01</span><h1>你的生活，<br />由你来安排。</h1><p>从今天的收支，到未来的选择。用一条路径，理解退休需要的资金与时间。</p></div><div className="heading-aside"><span>一份方案，三个问题</span><p>需要多少资金<br />何时满足条件<br />每月还需投入多少</p></div></div>
+    <div className="page-heading"><div><span className="section-number hero-kicker"><i /> 给未来多一种选择</span><h1>认真规划，<br />自由生活。</h1><p>从今天的收支，到未来的选择。用一条路径，理解退休需要的资金与时间。</p></div><div className="heading-aside"><span>从现在，走向从容。</span><div className="hero-path" aria-hidden="true"><i /><i /><i /><i /><i /><i /><i /></div><p>看清资金的路径，也看见生活的可能。</p></div></div>
     {active.isExample && <div className="example-notice">当前为独立示例，所有数字仅用于体验。<button type="button" onClick={() => append(blankPlan())}>建立我的空白方案</button></div>}
     {!active.isExample && workspace.plans.length === 1 && !active.draft.currentAge && <button type="button" className="example-link" onClick={() => append(examplePlan())}>先用「小林的示例」体验完整路径 →</button>}
     <div className="mobile-summary">{stale ? '正在更新 / 最后有效结果' : `${coverageNames.continue} · 基准`}<strong>{summaryResult?.kind === 'evaluated' ? attainmentText(summaryResult.result) : '待完善资料'}</strong></div>
@@ -93,7 +108,7 @@ function App() {
         <p className="latency" data-testid="evaluation-latency">{latency === undefined ? '等待输入' : `最近一次输入 → ${evaluation?.kind === 'evaluated' ? '有效评估' : '输入校验'} ${Math.round(latency)} ms`}</p>
       </section>
       <Results planName={active.name} evaluation={evaluated} stale={stale} pending={pending} inputIssues={inputIssues} />
-    </div><footer><span>FIRE · 财务独立与提前退休规划</span><span>人民币 · 按月计算 · 数据保存在你的浏览器</span></footer>
+    </div><footer><span>FIRE · 财务独立与提前退休规划</span><span>人民币 · 按月计算 · 数据保存在你的浏览器 · <a href="https://rareui.com" target="_blank" rel="noreferrer">组件来自 Rare UI ↗</a></span></footer>
   </main>;
 }
-createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);
+createRoot(document.getElementById('root')!).render(<StrictMode><MotionConfig reducedMotion="user"><App /></MotionConfig></StrictMode>);
